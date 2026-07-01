@@ -57,6 +57,34 @@ class RiskEngine:
     def mark_position_closed(self, symbol: str):
         self._open_symbols.discard(symbol)
 
+    def check_breakeven(
+        self,
+        side: Side,
+        entry_price: float,
+        current_price: float,
+        atr: float,
+        be_trigger_r: float = 1.0,
+        atr_mult_sl: float = 1.5,
+    ) -> float | None:
+        """Returns the new SL price if BE should be armed, else None.
+
+        BE arms when unrealised profit >= be_trigger_r × initial risk (1R default).
+        New SL is set to entry_price + small buffer to lock in breakeven.
+        """
+        sl_distance = atr * atr_mult_sl
+        if sl_distance <= 0:
+            return None
+        buffer = atr * 0.1  # tiny buffer above/below entry to avoid premature fill
+        if side == Side.LONG:
+            profit = current_price - entry_price
+            if profit >= sl_distance * be_trigger_r:
+                return entry_price + buffer
+        else:
+            profit = entry_price - current_price
+            if profit >= sl_distance * be_trigger_r:
+                return entry_price - buffer
+        return None
+
     def plan_trade(self, symbol: str, side: Side, entry_price: float, atr: float) -> TradePlan:
         self._roll_day()
 

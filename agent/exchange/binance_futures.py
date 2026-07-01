@@ -64,3 +64,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     def get_open_positions(self) -> list[dict]:
         positions = self._client.fetch_positions()
         return [p for p in positions if float(p.get("contracts") or 0) != 0]
+
+    def cancel_order(self, symbol: str, order_id: str) -> None:
+        self._client.cancel_order(order_id, symbol)

@@ -52,3 +52,7 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     def get_open_positions(self) -> list[dict]:
         ...
+
+    @abstractmethod
+    def cancel_order(self, symbol: str, order_id: str) -> None:
+        ...

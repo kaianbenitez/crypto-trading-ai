@@ -54,6 +54,8 @@ POLL_SEC   = 60           # check for new candle every 60s
 USE_SMC    = True         # toggle SMC+Context filters (set False for baseline mode)
 USE_MTF    = True         # multi-timeframe confluence filter
 MTF_MIN_CONFLUENCE = 55   # minimum weighted score to allow entry
+BE_TRIGGER_R    = 1.0     # arm breakeven after +1R unrealised profit
+MAX_TRADE_HOURS = 48      # force-close if trade still open after this many hours
 
 logging.basicConfig(
     level=logging.INFO,
@@ -129,6 +131,7 @@ class SymbolState:
         self.sl_order_id   = None
         self.tp_order_id   = None
         self.params        = dict(BASE_PARAMS, context_window_candles=120, max_atr_ratio=2.5)
+        self.be_armed      = False    # True once breakeven SL has been placed
 
 
 # ---------------------------------------------------------------------------
@@ -225,25 +228,77 @@ def _check_close(
     risk: RiskEngine,
     state: SymbolState,
 ) -> bool:
-    """Check if the open position has been closed by SL/TP on the exchange.
+    """Check if the open position has been closed; also handles BE arm + force-close.
     Returns True if position is now closed."""
-    try:
-        open_positions = adapter.get_open_positions()
-        open_syms = {p["symbol"].replace("/", "") for p in open_positions}
-        clean_sym = state.symbol.replace("/", "")
-
-        if clean_sym in open_syms:
-            return False  # still open
-
-    except Exception as e:
-        log.warning(f"[{state.symbol}] get_open_positions failed: {e}")
-        return False
-
-    # Position is gone — closed by exchange (SL or TP triggered)
     trade = session.get(Trade, state.open_trade_id)
     if not trade:
         return True
 
+    try:
+        open_positions = adapter.get_open_positions()
+        open_syms = {p["symbol"].replace("/", "") for p in open_positions}
+        clean_sym = state.symbol.replace("/", "")
+        still_open = clean_sym in open_syms
+    except Exception as e:
+        log.warning(f"[{state.symbol}] get_open_positions failed: {e}")
+        still_open = True  # assume open if we can't check
+
+    if still_open:
+        # --- Breakeven auto-arm ---
+        if not state.be_armed:
+            try:
+                candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=1)
+                current_price = candles[-1].close if candles else None
+                if current_price and trade.stop_loss:
+                    from agent.strategy.signal import Side as _Side
+                    trade_side = _Side.LONG if trade.side == "long" else _Side.SHORT
+                    atr_mult_sl = state.params.get("atr_mult_sl", 1.5)
+                    atr = abs(trade.entry_price - trade.stop_loss) / atr_mult_sl
+                    new_sl = risk.check_breakeven(
+                        trade_side, trade.entry_price, current_price, atr,
+                        be_trigger_r=BE_TRIGGER_R, atr_mult_sl=atr_mult_sl,
+                    )
+                    if new_sl is not None:
+                        # Cancel old SL order and place new one at breakeven
+                        be_side = "sell" if trade.side == "long" else "buy"
+                        try:
+                            if state.sl_order_id:
+                                adapter.cancel_order(state.symbol, state.sl_order_id)
+                            sl_order = adapter.place_stop_loss(state.symbol, be_side, trade.qty, new_sl)
+                            state.sl_order_id = sl_order.order_id
+                            state.be_armed = True
+                            log.info(f"[{state.symbol}] BE armed — SL moved to {new_sl:.4f}")
+                            _tg(f"🛡️ {state.symbol} breakeven armed — SL → {new_sl:.4f}")
+                        except Exception as e:
+                            log.warning(f"[{state.symbol}] BE arm failed: {e}")
+            except Exception as e:
+                log.warning(f"[{state.symbol}] BE check failed: {e}")
+
+        # --- Time-based force close ---
+        if trade.opened_at:
+            hours_open = (datetime.now(timezone.utc) - trade.opened_at).total_seconds() / 3600
+            if hours_open >= MAX_TRADE_HOURS:
+                log.info(f"[{state.symbol}] Force-closing after {hours_open:.1f}h (max {MAX_TRADE_HOURS}h)")
+                _tg(f"⏰ {state.symbol} force-closed after {hours_open:.0f}h")
+                try:
+                    close_side = "sell" if trade.side == "long" else "buy"
+                    adapter.place_market_order(state.symbol, close_side, trade.qty)
+                    # Cancel outstanding SL/TP
+                    for oid in [state.sl_order_id, state.tp_order_id]:
+                        if oid:
+                            try:
+                                adapter.cancel_order(state.symbol, oid)
+                            except Exception:
+                                pass
+                except Exception as e:
+                    log.error(f"[{state.symbol}] Force-close order failed: {e}")
+                    return False
+                still_open = False  # fall through to close logic below
+
+        if still_open:
+            return False
+
+    # Position is gone — closed by exchange (SL/TP triggered) or force-closed above
     # Determine exit price and reason from the current market price (approximation)
     try:
         candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=1)
@@ -296,6 +351,7 @@ def _check_close(
     state.open_trade_id = None
     state.sl_order_id   = None
     state.tp_order_id   = None
+    state.be_armed      = False
     return True
 
 
