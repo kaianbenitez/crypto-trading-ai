@@ -101,13 +101,16 @@ dashboard overlay / reference layer until paper trading calibrates the threshold
 - 30-day paper trading run → ~25 trades to validate
 
 ## Infrastructure
-- **VPS:** IONOS, AlmaLinux 9, 2 vCores / 2GB RAM / 90GB NVMe, $2/mo yearly ($24/yr)
-  — signed up 2026-07-01. Enough headroom for crypto bot + sports prop hunter later.
+- **VPS:** Friend's server (Hetzner-based). Friend (FJabilee) is hosting and deploying.
+- **GitHub repo:** https://github.com/kaianbenitez/crypto-trading-ai (private)
+  Collaborators: kaianbenitez, FJabilee — friend clones repo and runs deploy script.
 - **Deploy:** `deploy/deploy.sh` — one-shot setup for AlmaLinux 9 (uses `dnf` not `apt`)
 - **Services:** `deploy/trading-agent.service` + `deploy/webapi.service` (systemd,
   auto-restart on crash/reboot)
 - **No Cloudflare needed** — access dashboard via `http://VPS_IP:3000` (password protected).
   Can add Cloudflare Tunnel later for clean URL + SSL if desired.
+- **Status (2026-07-01):** Repo pushed to GitHub ✅. FJabilee invited as collaborator ✅.
+  Waiting on: friend to deploy + share VPS IP, Binance testnet API keys.
 
 ## How to run locally (dev/test)
 ```powershell
@@ -125,10 +128,11 @@ cd "Crypto Trading AI"
 $env:PYTHONPATH="."; py -m agent.orchestrator
 ```
 
-## How to deploy to IONOS VPS
+## How to deploy to VPS (friend's server)
 ```bash
-ssh root@YOUR_VPS_IP
-# upload project files (scp or git clone), then:
+ssh root@VPS_IP
+git clone https://github.com/kaianbenitez/crypto-trading-ai.git trading-ai
+cd trading-ai
 bash deploy/deploy.sh
 # fill in /home/ubuntu/trading-ai/.env with:
 #   BINANCE_API_KEY, BINANCE_API_SECRET (testnet keys from testnet.binancefuture.com)
@@ -205,13 +209,16 @@ SHA-256 pre-hash. Do NOT reintroduce passlib.
 - Don't go live without the kill-switch wired and tested.
 - Don't trade SOL/ADA/BTC until they show positive ROI in paper trading.
 - Don't add LLM to the live signal/execution loop.
-- Don't use `apt` on the IONOS VPS — it's AlmaLinux (RHEL-based), use `dnf`.
+- Don't use `apt` on the VPS — it's AlmaLinux (RHEL-based), use `dnf`.
 
 ## Next steps (in order)
-1. ⏳ Get IONOS VPS IP → run `deploy/deploy.sh` → wire Binance testnet key
-2. ⏳ Get Binance testnet API key (testnet.binancefuture.com → API Management)
-3. ⏳ Set up Telegram bot (optional but recommended for trade alerts)
-4. ⏳ Start 30-day paper trading run on XRP/USDT + ETH/USDT
-5. ⏳ After 30 days: review journal, check if win rate matches backtest (~44-59%)
-6. ⏳ Wire real Binance API key, graduate to live trading
-7. ⏳ Sports prop hunter project (MLB/NBA/WNBA) — same VPS, separate service
+1. ✅ Push project to GitHub (private repo: kaianbenitez/crypto-trading-ai)
+2. ✅ Invite FJabilee as collaborator
+3. ⏳ Get Binance testnet API key (testnet.binancefuture.com → API Management) — send to friend
+4. ⏳ Friend deploys on VPS: `git clone` → `bash deploy/deploy.sh` → fill `.env` → start services
+5. ⏳ Friend sends VPS IP → open dashboard at http://VPS_IP:3000
+6. ⏳ Set up Telegram bot (optional but recommended for trade alerts)
+7. ⏳ Start 30-day paper trading run on XRP/USDT + ETH/USDT
+8. ⏳ After 30 days: review journal, check if win rate matches backtest (~44-59%)
+9. ⏳ Wire real Binance API key, graduate to live trading
+10. ⏳ Sports prop hunter project (MLB/NBA/WNBA) — same VPS, separate service
