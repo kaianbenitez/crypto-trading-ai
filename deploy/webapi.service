@@ -1,0 +1,19 @@
+[Unit]
+Description=Crypto Trading AI — FastAPI Backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading-ai
+Environment=PYTHONPATH=/home/ubuntu/trading-ai
+EnvironmentFile=/home/ubuntu/trading-ai/.env
+ExecStart=/home/ubuntu/trading-ai/venv/bin/uvicorn webapi.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

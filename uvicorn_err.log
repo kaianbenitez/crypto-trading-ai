@@ -1,0 +1,22 @@
+INFO:     Started server process [24640]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:60333 - "WebSocket /ws/prices?symbol=BTC%2FUSDT" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:63936 - "WebSocket /ws/prices?symbol=ETH%2FUSDT" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:62827 - "WebSocket /ws/prices?symbol=SOL%2FUSDT" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     127.0.0.1:49360 - "WebSocket /ws/prices?symbol=BTC%2FUSDT" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:53998 - "WebSocket /ws/prices?symbol=ETH%2FUSDT" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:51696 - "WebSocket /ws/prices?symbol=SOL%2FUSDT" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed

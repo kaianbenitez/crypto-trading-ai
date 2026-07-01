@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd \"C:\\\\Users\\\\kbeni\\\\Downloads\\\\Crypto Trading AI\"; $secret = -join \\(\\(48..57\\)+\\(65..90\\)+\\(97..122\\) | Get-Random -Count 48 | ForEach-Object {[char]$_}\\); Add-Content -Path \".env\" -Value \"`nWEBAPI_SECRET_KEY=$secret\"; Write-Output \"Secret key generated and added to .env\")",
+      "Bash(curl -s -i -c /tmp/cookies.txt -X POST http://localhost:8000/api/login -H \"Content-Type: application/json\" -d '{\"password\":\"wrong-password\"}')",
+      "PowerShell(cd \"C:\\\\Users\\\\kbeni\\\\Downloads\\\\Crypto Trading AI\"; $env:PYTHONPATH=\".\"; py run_backtest.py)",
+      "PowerShell(Stop-Process -Id 13100 -Force)",
+      "PowerShell(py --version)",
+      "PowerShell(cd \"C:\\\\Users\\\\kbeni\\\\Downloads\\\\Crypto Trading AI\"; $env:PYTHONPATH=\".\"; py run_backtest_multi.py 2>&1 | Tee-Object -FilePath backtest_multi_out.txt)",
+      "PowerShell(cd \"C:\\\\Users\\\\kbeni\\\\Downloads\\\\Crypto Trading AI\"; $env:PYTHONPATH=\".\"; py run_backtest_mtf.py 2>&1 | Tee-Object -FilePath backtest_mtf_out.txt)"
+    ]
+  }
+}
