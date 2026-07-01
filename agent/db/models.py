@@ -60,6 +60,19 @@ class Trade(Base):
         return json.loads(self.postmortem) if self.postmortem else []
 
 
+class TradeMemory(Base):
+    __tablename__ = "trade_memory"
+
+    id         = Column(Integer, primary_key=True)
+    symbol     = Column(String, nullable=False, index=True)
+    trade_id   = Column(Integer, nullable=False)
+    text       = Column(Text, nullable=False)       # human-readable lesson
+    patterns   = Column(Text, nullable=False)        # JSON list of pattern tags
+    regime     = Column(String, nullable=True)
+    outcome    = Column(String, nullable=True)       # win | loss | breakeven
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def get_session(db_path: str = "sqlite:///trading_agent.db"):
     engine = create_engine(db_path)
     Base.metadata.create_all(engine)

@@ -42,6 +42,7 @@ from agent.strategy.mtf_scorer import compute_confluence, resample_ohlcv
 from agent.strategy.signal import Side
 from agent.strategy.smc import add_smc
 from agent.backtest.validate import BASE_PARAMS
+from agent.adapt.memory import save_lesson, apply_memory
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -339,6 +340,13 @@ def _check_close(
         log.info(f"[{state.symbol}] Param nudge: {changes}")
     state.params = new_params
 
+    # Save per-symbol lesson to memory
+    try:
+        save_lesson(trade, session)
+        log.info(f"[{state.symbol}] Memory lesson saved")
+    except Exception as e:
+        log.warning(f"[{state.symbol}] Memory save failed: {e}")
+
     emoji = "✅" if outcome == "win" else "❌"
     msg = (
         f"{emoji} {state.symbol} {trade.side.upper()} CLOSED\n"
@@ -464,6 +472,24 @@ def run():
                             )
                         except Exception as e:
                             log.warning(f"[{symbol}] MTF scorer failed (continuing): {e}")
+
+                    # --- Memory check ---
+                    try:
+                        mem_delta, mem_notes = apply_memory(symbol, signal, row, session)
+                        if mem_delta != 0:
+                            signal.confidence = max(0.0, min(1.0, signal.confidence + mem_delta))
+                            for note in mem_notes:
+                                signal.reasoning.append(note)
+                                log.info(f"[{symbol}] {note}")
+                            signal.indicator_snapshot["memory_delta"] = round(mem_delta, 2)
+                    except Exception as e:
+                        log.warning(f"[{symbol}] Memory check failed (continuing): {e}")
+
+                    # Block if memory tanked confidence below actionable threshold
+                    if signal.confidence <= 0:
+                        log.info(f"[{symbol}] Memory reduced confidence to zero — skipping")
+                        state.last_candle = now_candle
+                        continue
 
                     log.info(
                         f"[{symbol}] Signal: {signal.side.value.upper()} "
