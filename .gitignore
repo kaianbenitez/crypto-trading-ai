@@ -1,0 +1,10 @@
+.env
+*.db
+*.log
+__pycache__/
+*.pyc
+*.pyo
+data_cache/
+backtest_*_out.txt
+.next/
+node_modules/
