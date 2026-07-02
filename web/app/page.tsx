@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import AuthGate from "./components/AuthGate";
 import NavBar from "./components/NavBar";
 import { AgentStatus, api, Summary, Trade } from "@/lib/api";
 
@@ -310,5 +309,5 @@ function DashboardContent() {
 }
 
 export default function Page() {
-  return <AuthGate><DashboardContent /></AuthGate>;
+  return <DashboardContent />;
 }

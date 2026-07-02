@@ -11,8 +11,7 @@ from agent.db.models import get_session, Trade
 from agent.exchange.binance_futures import BinanceFuturesAdapter
 from webapi import app_state  # noqa: F401 (registers AgentState on the shared Base)
 from webapi.app_state import get_or_create_state
-from webapi.auth import verify_password, create_session_token, require_session, SESSION_COOKIE
-from webapi.schemas import LoginRequest, TradeOut, KillSwitchRequest, SummaryOut, AgentStatusOut
+from webapi.schemas import TradeOut, KillSwitchRequest, SummaryOut, AgentStatusOut
 
 app = FastAPI(title="Crypto Trading AI")
 
@@ -34,22 +33,17 @@ def db():
 
 
 @app.post("/api/login")
-def login(payload: LoginRequest, response: Response):
-    if not verify_password(payload.password):
-        raise HTTPException(status_code=401, detail="Incorrect password")
-    token = create_session_token()
-    response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", max_age=60 * 60 * 24 * 7)
+def login(response: Response):
     return {"ok": True}
 
 
 @app.post("/api/logout")
 def logout(response: Response):
-    response.delete_cookie(SESSION_COOKIE)
     return {"ok": True}
 
 
 @app.get("/api/trades", response_model=list[TradeOut])
-def list_trades(limit: int = 100, session=Depends(db), _=Depends(require_session)):
+def list_trades(limit: int = 100, session=Depends(db)):
     trades = session.query(Trade).order_by(Trade.opened_at.desc()).limit(limit).all()
     return [
         TradeOut(
@@ -65,7 +59,7 @@ def list_trades(limit: int = 100, session=Depends(db), _=Depends(require_session
 
 
 @app.get("/api/trades/{trade_id}", response_model=TradeOut)
-def get_trade(trade_id: int, session=Depends(db), _=Depends(require_session)):
+def get_trade(trade_id: int, session=Depends(db)):
     t = session.query(Trade).get(trade_id)
     if not t:
         raise HTTPException(status_code=404, detail="Trade not found")
@@ -80,7 +74,7 @@ def get_trade(trade_id: int, session=Depends(db), _=Depends(require_session)):
 
 
 @app.get("/api/summary", response_model=SummaryOut)
-def summary(session=Depends(db), _=Depends(require_session)):
+def summary(session=Depends(db)):
     trades = session.query(Trade).filter(Trade.closed_at.isnot(None)).all()
     wins = [t for t in trades if t.outcome == "win"]
     total_pnl = sum(t.pnl_usdt or 0 for t in trades)
@@ -98,7 +92,7 @@ def summary(session=Depends(db), _=Depends(require_session)):
 
 
 @app.post("/api/kill-switch")
-def set_kill_switch(payload: KillSwitchRequest, session=Depends(db), _=Depends(require_session)):
+def set_kill_switch(payload: KillSwitchRequest, session=Depends(db)):
     state = get_or_create_state(session)
     state.kill_switch_active = payload.active
     state.kill_switch_reason = payload.reason
@@ -121,7 +115,7 @@ def _service_state(name: str) -> str:
 
 
 @app.get("/api/agent-status", response_model=AgentStatusOut)
-def agent_status(_=Depends(require_session)):
+def agent_status():
     return AgentStatusOut(
         trading_agent=_service_state("trading-agent"),
         webapi=_service_state("webapi"),
