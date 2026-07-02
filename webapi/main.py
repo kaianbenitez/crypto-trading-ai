@@ -1,5 +1,7 @@
 import asyncio
 import json
+import subprocess
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Depends, Response, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,13 +12,13 @@ from agent.exchange.binance_futures import BinanceFuturesAdapter
 from webapi import app_state  # noqa: F401 (registers AgentState on the shared Base)
 from webapi.app_state import get_or_create_state
 from webapi.auth import verify_password, create_session_token, require_session, SESSION_COOKIE
-from webapi.schemas import LoginRequest, TradeOut, KillSwitchRequest, SummaryOut
+from webapi.schemas import LoginRequest, TradeOut, KillSwitchRequest, SummaryOut, AgentStatusOut
 
 app = FastAPI(title="Crypto Trading AI")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"https?://.*(:3000)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -102,6 +104,35 @@ def set_kill_switch(payload: KillSwitchRequest, session=Depends(db), _=Depends(r
     state.kill_switch_reason = payload.reason
     session.commit()
     return {"ok": True, "kill_switch_active": state.kill_switch_active}
+
+
+def _service_state(name: str) -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", name],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        return (result.stdout or result.stderr or "unknown").strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+@app.get("/api/agent-status", response_model=AgentStatusOut)
+def agent_status(_=Depends(require_session)):
+    return AgentStatusOut(
+        trading_agent=_service_state("trading-agent"),
+        webapi=_service_state("webapi"),
+        dashboard=_service_state("dashboard"),
+        nginx=_service_state("nginx"),
+        exchange=settings.exchange,
+        testnet=settings.binance_testnet,
+        symbols=["ETH/USDT", "XRP/USDT"],
+        bankroll_usdt=settings.bankroll_usdt,
+        checked_at=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 @app.websocket("/ws/prices")

@@ -6,15 +6,24 @@ from agent.exchange.base import ExchangeAdapter, OHLCV, OrderResult
 
 class BinanceFuturesAdapter(ExchangeAdapter):
     def __init__(self):
-        self._client = ccxt.binance({
+        self._client = ccxt.binanceusdm({
             "apiKey": settings.binance_api_key,
             "secret": settings.binance_api_secret,
-            "options": {"defaultType": "future"},
+            "options": {"fetchCurrencies": False},
             "enableRateLimit": True,
             "timeout": 15000,
         })
         if settings.binance_testnet:
-            self._client.set_sandbox_mode(True)
+            base_url = "https://testnet.binancefuture.com"
+            self._client.urls["api"].update({
+                "fapiPublic": f"{base_url}/fapi/v1",
+                "fapiPublicV2": f"{base_url}/fapi/v2",
+                "fapiPublicV3": f"{base_url}/fapi/v3",
+                "fapiPrivate": f"{base_url}/fapi/v1",
+                "fapiPrivateV2": f"{base_url}/fapi/v2",
+                "fapiPrivateV3": f"{base_url}/fapi/v3",
+                "fapiData": f"{base_url}/futures/data",
+            })
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 500) -> list[OHLCV]:
         raw = self._client.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)

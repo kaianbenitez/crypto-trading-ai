@@ -18,7 +18,7 @@ class Settings:
     bybit_testnet: bool = os.getenv("BYBIT_TESTNET", "true").lower() == "true"
 
     # Which exchange to use: "binance" or "bybit"
-    exchange: str = os.getenv("EXCHANGE", "bybit")
+    exchange: str = os.getenv("EXCHANGE", "binance")
 
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")

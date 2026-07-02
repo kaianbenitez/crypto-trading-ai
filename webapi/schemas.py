@@ -48,3 +48,15 @@ class SummaryOut(BaseModel):
     open_positions: int
     kill_switch_active: bool
     bankroll_usdt: float
+
+
+class AgentStatusOut(BaseModel):
+    trading_agent: str
+    webapi: str
+    dashboard: str
+    nginx: str
+    exchange: str
+    testnet: bool
+    symbols: list[str]
+    bankroll_usdt: float
+    checked_at: str

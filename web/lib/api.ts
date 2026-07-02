@@ -1,4 +1,11 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+function browserApiUrl() {
+  if (typeof window === "undefined") return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  return process.env.NEXT_PUBLIC_API_URL || window.location.origin;
+}
+
+function apiUrl() {
+  return browserApiUrl().replace(/\/$/, "");
+}
 
 export class ApiError extends Error {
   status: number;
@@ -9,7 +16,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${apiUrl()}${path}`, {
     ...options,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
@@ -52,11 +59,24 @@ export interface Summary {
   bankroll_usdt: number;
 }
 
+export interface AgentStatus {
+  trading_agent: string;
+  webapi: string;
+  dashboard: string;
+  nginx: string;
+  exchange: string;
+  testnet: boolean;
+  symbols: string[];
+  bankroll_usdt: number;
+  checked_at: string;
+}
+
 export const api = {
   login: (password: string) =>
     request<{ ok: boolean }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
   logout: () => request<{ ok: boolean }>("/api/logout", { method: "POST" }),
   summary: () => request<Summary>("/api/summary"),
+  agentStatus: () => request<AgentStatus>("/api/agent-status"),
   trades: (limit = 100) => request<Trade[]>(`/api/trades?limit=${limit}`),
   trade: (id: number) => request<Trade>(`/api/trades/${id}`),
   setKillSwitch: (active: boolean, reason?: string) =>
@@ -67,6 +87,6 @@ export const api = {
 };
 
 export function wsPricesUrl(symbol: string) {
-  const wsBase = API_URL.replace("http", "ws");
+  const wsBase = apiUrl().replace(/^http/, "ws");
   return `${wsBase}/ws/prices?symbol=${encodeURIComponent(symbol)}`;
 }

@@ -49,7 +49,7 @@ from agent.adapt.memory import save_lesson, apply_memory
 # Configuration
 # ---------------------------------------------------------------------------
 
-SYMBOLS    = ["ETH/USDT", "XRP/USDT", "SOL/USDT", "ADA/USDT", "BTC/USDT"]
+SYMBOLS    = ["ETH/USDT", "XRP/USDT"]
 TIMEFRAME  = "1h"
 CANDLES    = 200          # enough for all indicators + 120-candle context window
 POLL_SEC   = 60           # check for new candle every 60s

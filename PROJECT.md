@@ -1,224 +1,374 @@
-# Crypto Trading AI — Project Notes
+# Crypto Trading AI - Claude Code Handoff
 
-Read this first if resuming after a context reset.
+Read this first when resuming the project. This file is the current source of truth as of 2026-07-02.
+
+## Current Production/Testnet Status
+
+The bot is deployed and running on the user's IONOS Germany VPS.
+
+- VPS: IONOS Germany, Ubuntu 24.04.4 LTS
+- Public dashboard: http://31.70.111.85
+- Reverse proxy: Nginx on port 80
+- Backend API: FastAPI behind Nginx at `/api/*`, locally on `127.0.0.1:8000`
+- Dashboard app: Next.js behind Nginx at `/`, locally on `127.0.0.1:3000`
+- Trading agent: systemd service `trading-agent`
+- Exchange: Binance USD-M Futures testnet
+- Active trading symbols: `ETH/USDT`, `XRP/USDT` only
+- Current mode: paper/testnet trading, not live money
+- Testnet private API verified: balance read returned `5000.0 USDT`; open positions returned `0`
+- Dashboard login was tested successfully
+- API `/api/summary` was tested after login and returned zero trades, zero open positions, bankroll `1000.0`
+
+Important: Do not write API keys, API secrets, VPS password, or dashboard plaintext password into this file. Runtime secrets are stored only on the VPS in `/root/trading-ai/.env`.
 
 ## Goal
-Autonomous crypto trading agent for Binance Futures (testnet first, Bybit-compatible
-later via adapter interface). TA/FA/SMC-driven entries, self-tunes parameters after
-every trade, optimized for highest win-rate/ROI% without overfitting.
 
-## Key decisions (confirmed with user)
-- **Capital:** $1,000 USD recommended bankroll (updated from original $175 — at $1,000
-  position sizing is clean, well above Binance minimum notionals, fee drag proportionally
-  manageable). Set `BANKROLL_USDT=1000` in `.env`.
-- **Execution:** Starting on **Binance Futures testnet** for paper trading (30-day
-  minimum), then graduate to live. Exchange-side SL/TP orders always placed so positions
-  are protected even if the bot process goes offline.
-- **Paper trading duration:** 30 days minimum before going live — need ~25 trades to
-  confirm the historical win rate holds forward.
-- **Market:** Binance Futures, leveraged. Adapter interface allows Bybit later.
-- **Confirmed trading symbols:** XRP/USDT + ETH/USDT (strongest backtest results).
-  SOL/ADA/BTC scanned but not traded until they show consistent positive ROI.
-- **Timeframe:** 1h primary. MTF scorer uses resampled 4h + 1d for confluence.
-- **Self-adaptation:** PARAMETER-ONLY auto-tuning within preset safe bounds after each
-  closed trade. Agent must NEVER rewrite strategy logic/code — only numeric params.
-- **Risk defaults:** 1.5% risk/trade ($15 at $1k), 5% max daily drawdown kill-switch,
-  1 max concurrent position, 3x default leverage / 5x max.
-- **Stack:** Python, ccxt, pandas/numpy, `ta` lib, SQLAlchemy (SQLite), pydantic,
-  python-dotenv, requests (Telegram). No LLM in the live loop — ever.
+Autonomous crypto trading agent for Binance Futures testnet first, live later only after a minimum 30-day paper trading period. Strategy uses TA, market context, SMC-style confluence, MTF scoring, risk controls, exchange-side SL/TP orders, DB logging, and bounded parameter-only self-tuning after trades close.
 
-## Strategy stack (full, in execution order)
+No LLM is allowed in the live trading or execution loop.
 
+## Key Decisions
+
+- Capital baseline: `BANKROLL_USDT=1000`
+- Current exchange: Binance Futures testnet
+- Current symbols: `ETH/USDT`, `XRP/USDT`
+- Do not trade `SOL/USDT`, `ADA/USDT`, or `BTC/USDT` until they show consistent positive ROI in forward/paper results
+- Timeframe: 1h primary
+- Risk defaults:
+  - `MAX_RISK_PER_TRADE_PCT=1.5`
+  - `MAX_DAILY_DRAWDOWN_PCT=5`
+  - `MAX_CONCURRENT_POSITIONS=1`
+  - `DEFAULT_LEVERAGE=3`
+  - `MAX_LEVERAGE=5`
+- Paper trading duration: 30 days minimum before live trading
+- Target validation: roughly 25 trades, compare live paper win rate/ROI to backtest range
+- Self-adaptation: numeric parameter tuning only; never allow the bot to rewrite strategy code
+
+## Current VPS Services
+
+Use these commands over SSH as root:
+
+```bash
+systemctl status nginx dashboard webapi trading-agent --no-pager
+journalctl -u trading-agent -f
+journalctl -u webapi -n 100 --no-pager
+journalctl -u dashboard -n 100 --no-pager
+journalctl -u nginx -n 100 --no-pager
 ```
+
+Expected status:
+
+```text
+nginx: active
+dashboard: active
+webapi: active
+trading-agent: active
+```
+
+Service files:
+
+```text
+/etc/systemd/system/trading-agent.service
+/etc/systemd/system/webapi.service
+/etc/systemd/system/dashboard.service
+/usr/lib/systemd/system/nginx.service
+```
+
+Nginx config:
+
+```text
+/etc/nginx/sites-available/trading-ai
+/etc/nginx/sites-enabled/trading-ai
+```
+
+Nginx routes:
+
+```text
+/       -> http://127.0.0.1:3000
+/api/   -> http://127.0.0.1:8000
+/ws/    -> http://127.0.0.1:8000
+```
+
+## Runtime Files On VPS
+
+Project path:
+
+```bash
+/root/trading-ai
+```
+
+Environment file:
+
+```bash
+/root/trading-ai/.env
+```
+
+The VPS `.env` contains:
+
+```env
+EXCHANGE=binance
+BINANCE_API_KEY=<stored on VPS only>
+BINANCE_API_SECRET=<stored on VPS only>
+BINANCE_TESTNET=true
+BANKROLL_USDT=1000
+MAX_RISK_PER_TRADE_PCT=1.5
+MAX_DAILY_DRAWDOWN_PCT=5
+MAX_CONCURRENT_POSITIONS=1
+DEFAULT_LEVERAGE=3
+MAX_LEVERAGE=5
+WEBAPI_PASSWORD_HASH=<stored on VPS only>
+WEBAPI_SECRET_KEY=<stored on VPS only>
+```
+
+Do not overwrite `.env` casually. If credentials need rotation, edit it manually and restart services:
+
+```bash
+nano /root/trading-ai/.env
+systemctl restart webapi trading-agent
+```
+
+## Changes Made During Deployment
+
+These changes exist in the local project folder and were also copied to the VPS. They may not be committed/pushed to GitHub yet.
+
+1. `agent/exchange/binance_futures.py`
+   - Replaced deprecated `ccxt.binance(...).set_sandbox_mode(True)` path.
+   - Uses `ccxt.binanceusdm`.
+   - Sets `options.fetchCurrencies=False` to avoid spot/SAPI auth calls.
+   - When `BINANCE_TESTNET=true`, directly points USD-M futures endpoints to `https://testnet.binancefuture.com`.
+   - Verified private testnet calls work: balance and positions.
+
+2. `agent/orchestrator.py`
+   - Restricted live symbol list to:
+
+```python
+SYMBOLS = ["ETH/USDT", "XRP/USDT"]
+```
+
+3. `agent/config/settings.py`
+   - Default exchange changed from `bybit` to `binance`.
+
+4. `.env.example`
+   - Added `EXCHANGE=binance`.
+   - Updated bankroll default to `1000`.
+   - Added dashboard auth env keys.
+
+5. `deploy/deploy.sh`
+   - Updated for Ubuntu 24.04 / `apt`.
+   - Installs Node 22 from NodeSource because Next.js 16 requires Node >=20.9.
+   - Builds the Next.js frontend.
+   - Installs/enables `dashboard`, `webapi`, and `trading-agent` services.
+
+6. `deploy/dashboard.service`
+   - Added systemd service for Next.js production server on port 3000.
+
+7. `web/lib/api.ts`
+   - Browser API URL now resolves from current host instead of hardcoded `localhost:8000`.
+   - This matters because visitors' browsers cannot call VPS `localhost`.
+
+8. `webapi/main.py`
+   - CORS loosened to allow dashboard access from VPS/public origin.
+
+9. Nginx installed directly on VPS
+   - Added reverse proxy so public dashboard works at `http://31.70.111.85` without exposing `:3000` or `:8000`.
+
+## Git / Deployment Caveat
+
+The VPS was deployed from a local tarball, not from a fresh GitHub clone, because the Codex sandbox could not push to GitHub. The remote GitHub repo may be behind the actual running code.
+
+Before future redeploys, Claude Code should:
+
+```bash
+cd "C:\Users\kbeni\Downloads\Crypto Trading AI"
+git status
+```
+
+Review and commit the deployment changes listed above, then push to GitHub if desired. Do not commit `.env`, database files, logs, or any credentials.
+
+Known local generated artifacts that should not be committed:
+
+```text
+.env
+trading_agent.db
+*.log
+node_modules/
+.next/
+data_cache/
+backtest_*_out.txt
+```
+
+## Strategy Stack
+
 Every 1h candle close, per symbol:
 
-1. FA GATE (market_context.py)
-   - ATR ratio > 2.5× baseline → block (shock/event in progress)
-   - Fear & Greed extreme → reduce size or skip (TODO: wire FA APIs)
-   - Event calendar blackout (TODO: FOMC/CPI dates)
-   - Funding rate extreme → skip crowded side (TODO)
+1. FA / market shock gate
+   - ATR ratio > 2.5x baseline blocks shock/event conditions.
+   - Fear & Greed, event calendar, and funding-rate gates are TODOs.
 
-2. REGIME DETECTION (regime.py)
-   - ADX ≥ 25 → TRENDING → run trend_signal (EMA9/21 cross + MACD + volume)
-   - ADX < 25  → RANGING  → run mean_reversion_signal (RSI 30/65 + BB touch + volume)
+2. Regime detection
+   - ADX >= 25: trending mode, trend signal.
+   - ADX < 25: ranging mode, mean-reversion signal.
 
-3. MARKET CONTEXT FILTER (market_context.py)
-   - Rolling 120-candle window (5 days on 1h) — not 180-day history
-   - Structure bias: only take longs in bullish BOS, shorts in bearish BOS
-     (bias must be held ≥ 20 candles to be considered confirmed)
-   - Premium/discount: price in top 65%+ of range → block longs;
-     bottom 35%- of range → block shorts
+3. Market context filter
+   - Rolling 120-candle context window.
+   - Structure bias filter.
+   - Premium/discount range filter.
 
-4. SMC FILTER (smc.py)
-   - Order Block nearby → +0.10 confidence boost
-   - Fair Value Gap present → +0.05 boost
-   - Liquidity sweep just fired → +0.15 boost (strongest SMC signal)
-   - SMC is a soft filter (confidence boost), not a hard block
+4. SMC soft filter
+   - Order block nearby: confidence boost.
+   - Fair value gap: confidence boost.
+   - Liquidity sweep: strongest boost.
 
-5. MTF CONFLUENCE (mtf_scorer.py)
-   - Scores each TF 0-100: EMA, MACD, RSI, ADX, BB, structure, zone, SMC
-   - Weights: 1d=40%, 4h=30%, 1h=10%, 15m=5%, 1w=15%
-   - Blocks if MTF bias opposes signal direction
-   - Blocks if EV < 0.10R (EV = win_prob × TP_mult − loss_prob × SL_mult)
+5. MTF confluence
+   - 1h plus higher timeframe context.
+   - Blocks opposing MTF bias.
+   - Blocks low expected value.
 
-6. RISK ENGINE (risk/engine.py)
-   - 1.5% risk/trade → $15 at $1k bankroll
-   - SL = ATR × 1.5, TP = ATR × 3.0 (2:1 R:R default)
-   - Kill-switch check (both daily DD and manual dashboard toggle)
-   - Exchange-side STOP_MARKET + TAKE_PROFIT_MARKET orders placed immediately
+6. Risk engine
+   - Position sizing from bankroll and risk percent.
+   - SL = ATR x 1.5.
+   - TP = ATR x 3.0.
+   - Daily drawdown kill-switch.
+   - Exchange-side stop-loss/take-profit orders after entry.
 
-7. POST-TRADE
-   - DB log: entry reasoning, indicator snapshot, params snapshot
-   - On close: post-mortem generated, auto-tuner nudges params
-   - Telegram alert on open/close/error
-```
+7. Post-trade
+   - Trade logged to SQLite.
+   - Post-mortem generated.
+   - Numeric params may be tuned within bounds.
+   - Telegram alerts optional if env vars are configured.
 
-## Backtest results summary (2026-07-01, 180d, 1h, walk-forward out-of-sample)
+## Backtest Notes
 
-### Confirmed winners (baseline ensemble, fixed params):
+Backtest summary from 2026-07-01, 180d, 1h, walk-forward out-of-sample:
+
 | Symbol | WR% | ROI%/fold | MaxDD% | Trades |
-|---|---|---|---|---|
+|---|---:|---:|---:|---:|
 | XRP/USDT | 44.3 | +2.85 | 3.00 | 17 |
 | ETH/USDT | 35.0 | +0.70 | 4.06 | 17 |
 
-### Do not trade (negative ROI in all modes):
-- SOL/USDT, ADA/USDT, BTC/USDT — all negative ROI on this 180-day window
+Do not trade these yet:
 
-### Mode comparison finding:
-SMC+Context and MTF+SMC consistently reduce MaxDD but also cut trade frequency.
-With fixed (non-optimized) params, the filters over-cut and hurt ROI. Baseline
-ensemble with grid-optimized params performs best for now. SMC/MTF used as
-dashboard overlay / reference layer until paper trading calibrates the thresholds.
-
-### Earlier validated result (ETH, grid-optimized, fees+slippage):
-- 59.6% win rate, ~2% ROI/fold, 3.35% max DD, 28 trades — this is the target
-  to beat or match in live paper trading.
-
-## Expected live performance (XRP + ETH combined, baseline)
-- ~3-6 trades/week combined
-- ~$15 risk per trade at $1,000 bankroll
-- ~4-6% monthly ROI if historical edge holds forward
-- 30-day paper trading run → ~25 trades to validate
-
-## Infrastructure
-- **VPS:** Friend's server (Hetzner-based). Friend (FJabilee) is hosting and deploying.
-- **GitHub repo:** https://github.com/kaianbenitez/crypto-trading-ai (private)
-  Collaborators: kaianbenitez, FJabilee — friend clones repo and runs deploy script.
-- **Deploy:** `deploy/deploy.sh` — one-shot setup for AlmaLinux 9 (uses `dnf` not `apt`)
-- **Services:** `deploy/trading-agent.service` + `deploy/webapi.service` (systemd,
-  auto-restart on crash/reboot)
-- **No Cloudflare needed** — access dashboard via `http://VPS_IP:3000` (password protected).
-  Can add Cloudflare Tunnel later for clean URL + SSL if desired.
-- **Status (2026-07-01):** Repo pushed to GitHub ✅. FJabilee invited as collaborator ✅.
-  Waiting on: friend to deploy + share VPS IP, Binance testnet API keys.
-
-## How to run locally (dev/test)
-```powershell
-cd "Crypto Trading AI"
-copy .env.example .env          # fill WEBAPI_PASSWORD_HASH + WEBAPI_SECRET_KEY + BANKROLL_USDT=1000
-$env:PYTHONPATH="."; py -m uvicorn webapi.main:app --reload --port 8000
-```
-```powershell
-cd "Crypto Trading AI/web"
-npm run dev   # http://localhost:3000
-```
-```powershell
-# Run orchestrator locally (paper trading test):
-cd "Crypto Trading AI"
-$env:PYTHONPATH="."; py -m agent.orchestrator
+```text
+SOL/USDT
+ADA/USDT
+BTC/USDT
 ```
 
-## How to deploy to VPS (friend's server)
+Earlier ETH grid-optimized result:
+
+```text
+59.6% win rate, about 2% ROI/fold, 3.35% max DD, 28 trades
+```
+
+Expected paper performance if historical edge holds:
+
+```text
+3-6 trades/week combined
+about $15 risk per trade at $1,000 bankroll
+about 4-6% monthly ROI target, not guaranteed
+```
+
+## Local Development
+
+Backend:
+
+```powershell
+cd "C:\Users\kbeni\Downloads\Crypto Trading AI"
+$env:PYTHONPATH="."
+py -m uvicorn webapi.main:app --reload --port 8000
+```
+
+Frontend:
+
+```powershell
+cd "C:\Users\kbeni\Downloads\Crypto Trading AI\web"
+npm run dev
+```
+
+Agent locally:
+
+```powershell
+cd "C:\Users\kbeni\Downloads\Crypto Trading AI"
+$env:PYTHONPATH="."
+py -m agent.orchestrator
+```
+
+## Useful VPS Commands
+
+Restart web stack:
+
 ```bash
-ssh root@VPS_IP
-git clone https://github.com/kaianbenitez/crypto-trading-ai.git trading-ai
-cd trading-ai
-bash deploy/deploy.sh
-# fill in /home/ubuntu/trading-ai/.env with:
-#   BINANCE_API_KEY, BINANCE_API_SECRET (testnet keys from testnet.binancefuture.com)
-#   BINANCE_TESTNET=true
-#   BANKROLL_USDT=1000
-#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (optional but recommended)
-#   WEBAPI_PASSWORD_HASH (run: py webapi/hash_password.py)
-#   WEBAPI_SECRET_KEY (any random 32+ char string)
-sudo systemctl restart trading-agent webapi
+systemctl restart nginx dashboard webapi
 ```
 
-## Directory layout
-```
-agent/
-  exchange/       - adapter interface + Binance Futures implementation
-  strategy/
-    indicators.py     - TA indicators (EMA, MACD, RSI, BB, ATR, ADX, volume)
-    regime.py         - ADX-based trend/range regime detection
-    trend.py          - EMA/MACD trend-following signal
-    mean_reversion.py - RSI/BB mean-reversion signal
-    ensemble.py       - regime gate + context filter + SMC boost (main signal fn)
-    smc.py            - Smart Money Concepts: OB, FVG, liquidity sweeps
-    mtf_scorer.py     - Multi-timeframe confluence scorer + EV calculation
-  fundamental/
-    market_context.py - Rolling 120-candle ATR baseline, structure bias, premium/discount
-  risk/
-    engine.py         - Position sizing, SL/TP, daily DD kill-switch
-  backtest/
-    engine.py         - Bar-by-bar simulator, fees+slippage included
-    validate.py       - Walk-forward split + grid-search optimizer
-  data/
-    fetch.py          - OHLCV fetch from exchange
-  adapt/
-    postmortem.py     - Plain-English trade post-mortem generator
-    tuner.py          - Bounded parameter auto-tuner (numeric params only)
-  db/
-    models.py         - SQLite: Trade table (entry/exit/reasoning/postmortem)
-  config/
-    settings.py       - Env-driven settings (bankroll, leverage, risk%, etc.)
-  orchestrator.py     - MAIN LOOP: polls every 60s, acts on candle close
-                        Symbols: XRP/USDT + ETH/USDT (+ SOL/ADA/BTC scan-only)
-                        USE_SMC=True, USE_MTF=True toggles at top of file
+Restart trading agent:
 
-webapi/             - FastAPI backend (REST + WebSocket)
-  main.py           - /api/login, /api/trades, /api/summary, /api/kill-switch, /ws/prices
-  auth.py           - bcrypt password auth (SHA-256 pre-hash, no passlib)
-  schemas.py        - Pydantic response models
-
-web/                - Next.js frontend
-  app/page.tsx      - Dashboard (bankroll, ROI, win rate, kill-switch toggle)
-  app/journal/      - Trade journal (expandable rows, entry reasoning, post-mortem)
-  app/signals/      - Live price charts (BTC/ETH/SOL via WebSocket)
-
-deploy/
-  trading-agent.service  - systemd unit for orchestrator
-  webapi.service         - systemd unit for FastAPI
-  deploy.sh              - one-shot VPS setup script (AlmaLinux 9 / dnf)
-
-run_backtest.py              - single-symbol backtest (grid-search, full params)
-run_backtest_multi.py        - 12-symbol comparison (slow, full grid)
-run_backtest_daytrading.py   - 5-strategy × 5-symbol × 2-TF fast comparison
-run_backtest_smc.py          - fixed-param baseline vs SMC+Context (fast)
-run_backtest_smc_optimized.py- grid-search baseline vs SMC+Context (ETH+XRP)
-run_backtest_mtf.py          - 3-mode × 5-symbol MTF comparison (current best runner)
+```bash
+systemctl restart trading-agent
 ```
 
-## Auth note
-passlib is broken with bcrypt>=4.x. `webapi/auth.py` uses `bcrypt` directly with
-SHA-256 pre-hash. Do NOT reintroduce passlib.
+Stop trading agent immediately:
 
-## Things NOT to do
-- Don't let the adapt loop change strategy code — only bounded numeric params.
-- Don't skip walk-forward validation.
-- Don't go live without the kill-switch wired and tested.
-- Don't trade SOL/ADA/BTC until they show positive ROI in paper trading.
-- Don't add LLM to the live signal/execution loop.
-- Don't use `apt` on the VPS — it's AlmaLinux (RHEL-based), use `dnf`.
+```bash
+systemctl stop trading-agent
+```
 
-## Next steps (in order)
-1. ✅ Push project to GitHub (private repo: kaianbenitez/crypto-trading-ai)
-2. ✅ Invite FJabilee as collaborator
-3. ⏳ Get Binance testnet API key (testnet.binancefuture.com → API Management) — send to friend
-4. ⏳ Friend deploys on VPS: `git clone` → `bash deploy/deploy.sh` → fill `.env` → start services
-5. ⏳ Friend sends VPS IP → open dashboard at http://VPS_IP:3000
-6. ⏳ Set up Telegram bot (optional but recommended for trade alerts)
-7. ⏳ Start 30-day paper trading run on XRP/USDT + ETH/USDT
-8. ⏳ After 30 days: review journal, check if win rate matches backtest (~44-59%)
-9. ⏳ Wire real Binance API key, graduate to live trading
-10. ⏳ Sports prop hunter project (MLB/NBA/WNBA) — same VPS, separate service
+Disable trading agent on reboot:
+
+```bash
+systemctl disable trading-agent
+```
+
+Enable/start trading agent:
+
+```bash
+systemctl enable --now trading-agent
+```
+
+Check active ports:
+
+```bash
+ss -ltnp | grep -E ':80|:3000|:8000'
+```
+
+Test local web stack from VPS:
+
+```bash
+curl -I http://127.0.0.1
+curl -s http://127.0.0.1/api/summary
+```
+
+Note: `/api/summary` should return `401 Unauthorized` unless authenticated.
+
+## Auth Note
+
+`passlib` is broken with bcrypt >=4.x in this project context. `webapi/auth.py` uses `bcrypt` directly with SHA-256 pre-hash. Do not reintroduce `passlib`.
+
+## Hard Safety Rules
+
+- Do not go live before the full 30-day paper trading review.
+- Do not switch `BINANCE_TESTNET=false` without explicit user approval.
+- Do not trade SOL/ADA/BTC yet.
+- Do not add an LLM to signal generation, risk, or execution.
+- Do not let adaptation modify code or strategy logic.
+- Do not commit secrets.
+- Do not expose port 8000 directly unless there is a reason; use Nginx proxy.
+- Keep exchange-side SL/TP behavior intact.
+- Keep kill-switch behavior intact.
+
+## Immediate Next Steps For Claude Code
+
+1. Run `git status` locally and review all uncommitted deployment changes.
+2. Commit and push the VPS deployment fixes to GitHub.
+3. Confirm `agent/exchange/binance_futures.py` uses the direct Binance Futures testnet URL patch.
+4. Confirm `agent/orchestrator.py` trades only `ETH/USDT` and `XRP/USDT`.
+5. Monitor the first 24 hours of paper trading logs:
+
+```bash
+ssh root@31.70.111.85
+journalctl -u trading-agent -f
+```
+
+6. Watch dashboard at `http://31.70.111.85`.
+7. Set up Telegram alerts if the user wants mobile notifications.
+8. After 30 days, review closed trades, win rate, ROI, drawdown, and post-mortems before any live-trading discussion.
