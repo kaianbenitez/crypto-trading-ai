@@ -1,17 +1,12 @@
-"""Macro regime awareness — self-adjusting risk based on market conditions.
+"""Macro regime awareness — size-only risk adjustment.
 
-Checks three signals every cycle:
+Checks two signals:
   1. Fear & Greed Index (alternative.me API — free, no key needed)
   2. BTC funding rate (exchange API — crowded long/short detection)
-  3. BTC dominance shift (proxy for alt season vs risk-off)
 
-Returns a MacroState that the orchestrator uses to:
-  - Reduce position sizes during extreme fear/greed
-  - Skip new entries during extreme funding rates
-  - Weight alt signals lower when BTC dominance rising fast
-
-No API key required for Fear & Greed. Funding rate from exchange adapter.
-Falls back gracefully if any source is unavailable.
+Returns a MacroState that the orchestrator uses to reduce position sizes
+during extreme conditions. Direction (long/short blocking) is fully
+delegated to MTF confluence and market structure filters.
 """
 from __future__ import annotations
 
@@ -33,9 +28,9 @@ SIZE_MULTIPLIERS = {
     "normal":        1.00,
     "extreme_fear":  0.60,   # reduce size — capitulation possible but also reversal
     "extreme_greed": 0.50,   # reduce size — euphoria = blow-off top risk
-    "crowded_long":  0.70,   # longs crowded — avoid new longs
-    "crowded_short": 0.70,   # shorts crowded — avoid new shorts
-    "risk_off":      0.40,   # everything screaming danger — minimal exposure
+    "crowded_long":  0.70,   # longs crowded — reduce size
+    "crowded_short": 0.70,   # shorts crowded — reduce size
+    "risk_off":      0.40,   # extreme sentiment + crowded funding — minimal size
 }
 
 
@@ -45,8 +40,6 @@ class MacroState:
     funding_rate_pct:  float = 0.0     # annualised %
     regime:            str   = "normal"
     size_multiplier:   float = 1.0
-    block_longs:       bool  = False
-    block_shorts:      bool  = False
     notes:             list  = field(default_factory=list)
 
 
@@ -94,26 +87,24 @@ def assess_macro(adapter=None) -> MacroState:
             notes.append(f"Extreme Greed ({fg}) — reducing size only (direction left to MTF/structure)")
             state.regime = "extreme_greed"
 
-    # Funding rate
+    # Funding rate — size reduction only, no directional blocks
     if adapter:
         fr = fetch_funding_rate(adapter)
         if fr is not None:
             state.funding_rate_pct = fr
             if fr > FUNDING_CROWDED_LONG * 100:
-                notes.append(f"Crowded longs (funding {fr:+.1f}% pa) — avoiding new longs")
-                state.block_longs = True
+                notes.append(f"Crowded longs (funding {fr:+.1f}% pa) — reducing size")
                 if state.regime == "normal":
                     state.regime = "crowded_long"
             elif fr < FUNDING_CROWDED_SHORT * 100:
-                notes.append(f"Crowded shorts (funding {fr:+.1f}% pa) — avoiding new shorts")
-                state.block_shorts = True
+                notes.append(f"Crowded shorts (funding {fr:+.1f}% pa) — reducing size")
                 if state.regime == "normal":
                     state.regime = "crowded_short"
 
-    # Combined risk-off: both extreme greed/fear AND crowded funding
-    if (state.block_longs and state.block_shorts):
+    # Combined caution: extreme sentiment AND crowded funding
+    if state.regime in ("extreme_fear", "extreme_greed") and abs(state.funding_rate_pct) > abs(FUNDING_CROWDED_LONG * 100):
         state.regime = "risk_off"
-        notes.append("Risk-off: multiple danger signals — minimal exposure")
+        notes.append("Risk-off: extreme sentiment + crowded funding — minimal size")
 
     state.size_multiplier = SIZE_MULTIPLIERS.get(state.regime, 1.0)
     state.notes = notes

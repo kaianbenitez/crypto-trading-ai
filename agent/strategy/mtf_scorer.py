@@ -31,14 +31,13 @@ from agent.strategy.smc import add_smc
 
 TF_WEIGHTS = {
     "15m": 0.05,
-    "1h":  0.10,
-    "4h":  0.30,
-    "1d":  0.40,
+    "1h":  0.20,
+    "4h":  0.35,
+    "1d":  0.25,
     "1w":  0.15,
 }
 
-# Minimum EV threshold to allow entry (in R multiples)
-MIN_EV_R = 0.10
+MIN_EV_R = 0.05
 
 
 def score_single_tf(df: pd.DataFrame, params: dict) -> dict:

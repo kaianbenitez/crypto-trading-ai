@@ -547,17 +547,7 @@ def run():
                     except Exception as e:
                         log.warning(f"[{symbol}] Weight apply failed (continuing): {e}")
 
-                    # --- Macro gate ---
-                    if macro.block_longs and signal.side == Side.LONG:
-                        log.info(f"[{symbol}] Macro blocked LONG: {macro.regime}")
-                        state.last_candle = now_candle
-                        continue
-                    if macro.block_shorts and signal.side == Side.SHORT:
-                        log.info(f"[{symbol}] Macro blocked SHORT: {macro.regime}")
-                        state.last_candle = now_candle
-                        continue
-
-                    # Apply macro size multiplier to params
+                    # --- Macro size adjustment (direction handled by MTF/structure) ---
                     trade_params = dict(state.params)
                     if macro.size_multiplier < 1.0:
                         orig_risk = trade_params.get("max_risk_per_trade_pct", 1.5)

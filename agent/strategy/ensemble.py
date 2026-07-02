@@ -7,19 +7,13 @@ from agent.strategy.signal import Signal, Side
 
 
 def generate_signal(row: pd.Series, prev: pd.Series, params: dict) -> Signal:
-    """Regime-gated ensemble with optional market-context and SMC filters.
+    """Regime-gated ensemble — all filters are soft except ATR shock.
 
     Layer order:
-      1. ATR shock filter (blocks entries during volatility spikes)
-      2. Regime detection (trend vs mean-reversion)
-      3. TA signal (EMA/MACD or RSI/BB)
-      4. Market context filter (structure bias + premium/discount zone)
-      5. SMC confidence boost (OB, FVG, liquidity sweep alignment)
-
-    Layers 1, 4, 5 activate only when the mc_* / smc_* columns are present
-    in the row (added by add_market_context + add_smc pre-processing).
-    Falls back to plain TA ensemble when those columns are absent so the
-    existing backtests keep working unchanged.
+      1. ATR shock filter (hard-block during volatility spikes)
+      2. Regime detection (trend vs mean-reversion) → TA signal
+      3. Market context (structure bias + premium/discount → confidence penalties)
+      4. SMC confidence boost (OB, FVG, liquidity sweep alignment)
     """
 
     # ------------------------------------------------------------------
@@ -51,46 +45,33 @@ def generate_signal(row: pd.Series, prev: pd.Series, params: dict) -> Signal:
         return signal
 
     # ------------------------------------------------------------------
-    # 3. Market context filter (only if columns present)
+    # 3. Market context — soft penalties (never hard-block)
     # ------------------------------------------------------------------
     structure_bias = row.get("mc_structure_bias")
     in_discount    = row.get("mc_in_discount")
     in_premium     = row.get("mc_in_premium")
     range_pos      = row.get("mc_range_position")
 
+    ctx_penalty = 0.0
     if structure_bias is not None and pd.notna(structure_bias):
         if signal.side == Side.LONG and int(structure_bias) == -1:
-            return Signal(
-                Side.NONE, 0.0,
-                reasoning=["Long blocked: market structure bias is BEARISH (recent BOS down)"],
-                indicator_snapshot={"regime": regime.value, "structure_bias": structure_bias},
-                strategy_name="context_filter",
-            )
+            ctx_penalty += 0.15
+            signal.reasoning.append("Structure bias BEARISH — confidence reduced (counter-trend)")
         if signal.side == Side.SHORT and int(structure_bias) == 1:
-            return Signal(
-                Side.NONE, 0.0,
-                reasoning=["Short blocked: market structure bias is BULLISH (recent BOS up)"],
-                indicator_snapshot={"regime": regime.value, "structure_bias": structure_bias},
-                strategy_name="context_filter",
-            )
+            ctx_penalty += 0.15
+            signal.reasoning.append("Structure bias BULLISH — confidence reduced (counter-trend)")
 
     if in_premium is not None and pd.notna(in_premium):
         if signal.side == Side.LONG and bool(in_premium):
-            return Signal(
-                Side.NONE, 0.0,
-                reasoning=[f"Long blocked: price in PREMIUM zone ({range_pos:.2f}) — unfavourable for longs"],
-                indicator_snapshot={"regime": regime.value, "range_position": range_pos},
-                strategy_name="context_filter",
-            )
+            ctx_penalty += 0.10
+            signal.reasoning.append(f"Price in PREMIUM zone ({range_pos:.2f}) — unfavourable for longs")
 
     if in_discount is not None and pd.notna(in_discount):
         if signal.side == Side.SHORT and bool(in_discount):
-            return Signal(
-                Side.NONE, 0.0,
-                reasoning=[f"Short blocked: price in DISCOUNT zone ({range_pos:.2f}) — unfavourable for shorts"],
-                indicator_snapshot={"regime": regime.value, "range_position": range_pos},
-                strategy_name="context_filter",
-            )
+            ctx_penalty += 0.10
+            signal.reasoning.append(f"Price in DISCOUNT zone ({range_pos:.2f}) — unfavourable for shorts")
+
+    signal.confidence = max(0.0, signal.confidence - ctx_penalty)
 
     # ------------------------------------------------------------------
     # 4. SMC confidence boost (soft filter — aligns, does not hard-block)
