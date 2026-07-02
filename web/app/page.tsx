@@ -5,110 +5,130 @@ import AuthGate from "./components/AuthGate";
 import NavBar from "./components/NavBar";
 import { AgentStatus, api, Summary, Trade } from "@/lib/api";
 
-const money = new Intl.NumberFormat("en-US", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const price = new Intl.NumberFormat("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
 
-function serviceText(value?: string) {
-  if (!value) return "unknown";
-  return value === "active" ? "online" : value;
+function serviceText(v?: string) { return !v ? "unknown" : v === "active" ? "online" : v; }
+function serviceColor(v?: string) {
+  if (v === "active") return "var(--green)";
+  if (v === "inactive" || v === "failed") return "var(--red)";
+  return "var(--muted)";
 }
+function pnlColor(v: number) { return v > 0 ? "var(--green)" : v < 0 ? "var(--red)" : "var(--text)"; }
 
-function serviceClass(value?: string) {
-  if (value === "active") return "text-emerald-300";
-  if (value === "inactive" || value === "failed") return "text-red-300";
-  return "text-zinc-400";
-}
-
-function pnlClass(value: number) {
-  if (value > 0) return "text-emerald-300";
-  if (value < 0) return "text-red-300";
-  return "text-zinc-100";
-}
-
-function Cell({ label, value, tone }: { label: string; value: string; tone?: string }) {
+function Badge({ children, color }: { children: React.ReactNode; color?: string }) {
   return (
-    <div className="min-w-0 border-r border-zinc-800/80 px-4 py-3 last:border-r-0">
-      <div className="text-[13px] text-zinc-500">{label}</div>
-      <div className={`mt-1 truncate text-[15px] font-medium ${tone || "text-zinc-100"}`}>{value}</div>
+    <span style={{ color: color || "var(--muted)", background: color ? color + "18" : "var(--surface2)", border: `1px solid ${color ? color + "30" : "var(--border)"}` }}
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium">
+      {children}
+    </span>
+  );
+}
+
+function StatCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)" }} className="rounded-xl p-4">
+      <div style={{ color: "var(--muted)" }} className="text-xs font-medium uppercase tracking-wider">{label}</div>
+      <div style={{ color: color || "var(--text)" }} className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
+      {sub && <div style={{ color: "var(--muted)" }} className="mt-1 text-xs">{sub}</div>}
     </div>
   );
 }
 
-function ServiceRow({ name, state }: { name: string; state?: string }) {
+function ServiceDot({ state }: { state?: string }) {
   return (
-    <div className="flex items-center justify-between border-b border-zinc-800/70 py-2 last:border-b-0">
-      <span className="text-sm text-zinc-300">{name}</span>
-      <span className={`text-sm font-medium ${serviceClass(state)}`}>{serviceText(state)}</span>
-    </div>
-  );
-}
-
-function RecentTrade({ trade }: { trade: Trade }) {
-  const pnl = trade.pnl_usdt ?? 0;
-  const status = trade.closed_at ? trade.outcome || "closed" : "open";
-
-  return (
-    <div className="grid grid-cols-[1fr_auto] gap-4 border-b border-zinc-800/70 py-3 last:border-b-0">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="font-medium text-zinc-100">{trade.symbol}</span>
-          <span className={trade.side === "long" ? "text-emerald-300" : "text-red-300"}>
-            {trade.side}
-          </span>
-          <span className="text-zinc-500">{trade.strategy_name}</span>
-        </div>
-        <div className="mt-1 truncate text-sm text-zinc-500">
-          {trade.entry_reasoning[0] || "No entry reason recorded"}
-        </div>
-      </div>
-      <div className="text-right">
-        <div className={`text-sm font-medium ${trade.closed_at ? pnlClass(pnl) : "text-amber-300"}`}>
-          {trade.closed_at ? `${pnl >= 0 ? "+" : ""}${money.format(pnl)} USDT` : "open"}
-        </div>
-        <div className="mt-1 text-sm text-zinc-500">{status}</div>
-      </div>
-    </div>
+    <span className="inline-block h-2 w-2 rounded-full" style={{ background: serviceColor(state) }} />
   );
 }
 
 function OpenPosition({ trade }: { trade: Trade }) {
-  const reason = trade.entry_reasoning[0] || "No entry reason recorded";
-
   return (
-    <div className="border-b border-zinc-800/70 py-3 last:border-b-0">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="font-medium text-zinc-100">{trade.symbol}</span>
-          <span className={trade.side === "long" ? "text-emerald-300" : "text-red-300"}>
-            {trade.side}
-          </span>
-          <span className="text-zinc-500">{trade.strategy_name}</span>
+    <div style={{ border: "1px solid var(--border)", background: "var(--surface2)" }} className="rounded-xl p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-base">{trade.symbol}</span>
+          <Badge color={trade.side === "long" ? "var(--green)" : "var(--red)"}>
+            {trade.side.toUpperCase()}
+          </Badge>
+          <Badge>{trade.strategy_name}</Badge>
         </div>
-        <span className="text-sm text-amber-300">open</span>
+        <Badge color="var(--amber)">OPEN</Badge>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-x-5 gap-y-2 text-sm md:grid-cols-4">
-        <div>
-          <span className="text-zinc-500">Entry </span>
-          <span className="text-zinc-200">{trade.entry_price}</span>
-        </div>
-        <div>
-          <span className="text-zinc-500">SL </span>
-          <span className="text-zinc-200">{trade.stop_loss}</span>
-        </div>
-        <div>
-          <span className="text-zinc-500">TP </span>
-          <span className="text-zinc-200">{trade.take_profit}</span>
-        </div>
-        <div>
-          <span className="text-zinc-500">Lev </span>
-          <span className="text-zinc-200">{trade.leverage}x</span>
-        </div>
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: "Entry", value: price.format(trade.entry_price) },
+          { label: "Stop Loss", value: price.format(trade.stop_loss) },
+          { label: "Take Profit", value: price.format(trade.take_profit) },
+          { label: "Leverage", value: `${trade.leverage}×` },
+        ].map(({ label, value }) => (
+          <div key={label} style={{ background: "var(--surface)", border: "1px solid var(--border)" }} className="rounded-lg p-3">
+            <div style={{ color: "var(--muted)" }} className="text-xs">{label}</div>
+            <div className="mt-1 text-sm font-medium tabular-nums">{value}</div>
+          </div>
+        ))}
       </div>
-      <div className="mt-2 truncate text-sm text-zinc-500">{reason}</div>
+      {trade.entry_reasoning[0] && (
+        <div style={{ color: "var(--muted)", borderTop: "1px solid var(--border)" }} className="mt-3 pt-3 text-xs">
+          {trade.entry_reasoning[0]}
+        </div>
+      )}
     </div>
   );
+}
+
+function TradeRow({ trade }: { trade: Trade }) {
+  const pnl = trade.pnl_usdt ?? 0;
+  return (
+    <div style={{ borderBottom: "1px solid var(--border)" }} className="flex items-center justify-between gap-4 py-3 last:border-b-0">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-medium text-sm">{trade.symbol}</span>
+          <Badge color={trade.side === "long" ? "var(--green)" : "var(--red)"}>{trade.side.toUpperCase()}</Badge>
+          <Badge>{trade.outcome || "closed"}</Badge>
+        </div>
+        <div style={{ color: "var(--muted)" }} className="mt-1 text-xs truncate">
+          {trade.entry_reasoning[0] || "—"}
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <div style={{ color: pnlColor(pnl) }} className="text-sm font-semibold tabular-nums">
+          {pnl >= 0 ? "+" : ""}{money.format(pnl)} USDT
+        </div>
+        <div style={{ color: "var(--muted)" }} className="text-xs mt-0.5">{trade.exit_reason || "closed"}</div>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)" }} className="rounded-xl overflow-hidden">
+      <div style={{ borderBottom: "1px solid var(--border)" }} className="flex items-center justify-between px-5 py-3">
+        <span className="font-medium text-sm">{title}</span>
+        {right}
+      </div>
+      <div className="px-5">{children}</div>
+    </div>
+  );
+}
+
+function MacroBadge({ regime }: { regime?: string }) {
+  if (!regime || regime === "normal") return null;
+  const colors: Record<string, string> = {
+    extreme_fear: "var(--red)",
+    extreme_greed: "var(--amber)",
+    crowded_long: "var(--amber)",
+    crowded_short: "var(--amber)",
+    risk_off: "var(--red)",
+  };
+  const labels: Record<string, string> = {
+    extreme_fear: "Extreme Fear",
+    extreme_greed: "Extreme Greed",
+    crowded_long: "Crowded Longs",
+    crowded_short: "Crowded Shorts",
+    risk_off: "Risk Off",
+  };
+  return <Badge color={colors[regime] || "var(--muted)"}>{labels[regime] || regime}</Badge>;
 }
 
 function DashboardContent() {
@@ -120,190 +140,175 @@ function DashboardContent() {
 
   async function load() {
     try {
-      const [summaryResult, statusResult, tradesResult] = await Promise.all([
-        api.summary(),
-        api.agentStatus(),
-        api.trades(5),
-      ]);
-      setSummary(summaryResult);
-      setStatus(statusResult);
-      setTrades(tradesResult);
-      setError(null);
-    } catch {
-      setError("Could not load dashboard data");
-    }
+      const [s, st, t] = await Promise.all([api.summary(), api.agentStatus(), api.trades(10)]);
+      setSummary(s); setStatus(st); setTrades(t); setError(null);
+    } catch { setError("Could not reach API"); }
   }
 
-  useEffect(() => {
-    load();
-    const interval = setInterval(load, 15000);
-    return () => clearInterval(interval);
-  }, []);
+  useEffect(() => { load(); const i = setInterval(load, 15000); return () => clearInterval(i); }, []);
 
   async function toggleKillSwitch() {
     if (!summary) return;
     setToggling(true);
-    try {
-      await api.setKillSwitch(!summary.kill_switch_active, "manual toggle from dashboard");
-      await load();
-    } finally {
-      setToggling(false);
-    }
+    try { await api.setKillSwitch(!summary.kill_switch_active, "manual toggle"); await load(); }
+    finally { setToggling(false); }
   }
 
   const lastChecked = useMemo(() => {
-    if (!status?.checked_at) return "not checked";
+    if (!status?.checked_at) return "—";
     return new Date(status.checked_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }, [status?.checked_at]);
 
-  const openTrades = trades.filter((trade) => !trade.closed_at);
-  const closedTrades = trades.filter((trade) => trade.closed_at);
+  const openTrades = trades.filter(t => !t.closed_at);
+  const closedTrades = trades.filter(t => t.closed_at);
+  const killActive = summary?.kill_switch_active;
 
   return (
-    <div className="min-h-screen bg-[#0f0f0f] text-zinc-100">
+    <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
       <NavBar />
-      <main className="mx-auto max-w-6xl px-6 py-7">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+
+        {/* Header */}
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-[20px] font-semibold text-zinc-50">Dashboard</h1>
-            <p className="mt-1 text-sm text-zinc-500">
-              Binance Futures testnet, ETH/XRP only. Last check {lastChecked}.
+            <h1 className="text-xl font-semibold">Dashboard</h1>
+            <p style={{ color: "var(--muted)" }} className="mt-1 text-sm">
+              Last updated {lastChecked} · Testnet
             </p>
           </div>
-          {summary && (
-            <button
-              onClick={toggleKillSwitch}
-              disabled={toggling}
-              className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                summary.kill_switch_active
-                  ? "border-red-500/50 bg-red-500/15 text-red-200 hover:bg-red-500/20"
-                  : "border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
-              }`}
-            >
-              {summary.kill_switch_active ? "Resume trading" : "Halt new entries"}
-            </button>
-          )}
+          <button
+            onClick={toggleKillSwitch}
+            disabled={toggling}
+            style={{
+              background: killActive ? "rgba(239,68,68,0.12)" : "var(--surface)",
+              border: `1px solid ${killActive ? "rgba(239,68,68,0.4)" : "var(--border2)"}`,
+              color: killActive ? "var(--red)" : "var(--text)",
+            }}
+            className="rounded-lg px-4 py-2 text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50"
+          >
+            {killActive ? "▐▐  Resume trading" : "⏹  Halt new entries"}
+          </button>
         </div>
 
         {error && (
-          <div className="mb-4 rounded-md border border-red-900/70 bg-red-950/30 px-4 py-3 text-sm text-red-200">
-            {error}
-          </div>
+          <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--red)" }}
+            className="mb-5 rounded-lg px-4 py-3 text-sm">{error}</div>
         )}
 
-        <section className="mb-5 overflow-hidden rounded-lg border border-zinc-800 bg-[#171717]">
-          <div className="grid grid-cols-2 md:grid-cols-6">
-            <Cell label="Agent" value={serviceText(status?.trading_agent)} tone={serviceClass(status?.trading_agent)} />
-            <Cell label="Mode" value={status?.testnet ? "testnet" : "live"} tone={status?.testnet ? "text-amber-300" : "text-red-300"} />
-            <Cell label="Bankroll" value={`${money.format(summary?.bankroll_usdt ?? status?.bankroll_usdt ?? 0)} USDT`} />
-            <Cell label="ROI" value={`${(summary?.roi_pct ?? 0).toFixed(2)}%`} tone={pnlClass(summary?.roi_pct ?? 0)} />
-            <Cell label="Win rate" value={`${(summary?.win_rate_pct ?? 0).toFixed(1)}%`} />
-            <Cell label="Open positions" value={String(summary?.open_positions ?? 0)} tone={(summary?.open_positions ?? 0) > 0 ? "text-amber-300" : "text-zinc-100"} />
-          </div>
-        </section>
-
-        <div className="grid gap-5 lg:grid-cols-[1.35fr_0.65fr]">
-          <section className="rounded-lg border border-zinc-800 bg-[#171717]">
-            <div className="border-b border-zinc-800 px-4 py-3">
-              <div className="font-medium text-zinc-100">Trading state</div>
-            </div>
-            <div className="grid gap-0 md:grid-cols-2">
-              <div className="border-b border-zinc-800 p-4 md:border-b-0 md:border-r">
-                <div className="grid grid-cols-2 gap-x-5 gap-y-4">
-                  <div>
-                    <div className="text-sm text-zinc-500">Exchange</div>
-                    <div className="mt-1 text-sm font-medium text-zinc-100">{status?.exchange || "binance"}</div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-zinc-500">Kill switch</div>
-                    <div className={`mt-1 text-sm font-medium ${summary?.kill_switch_active ? "text-red-300" : "text-emerald-300"}`}>
-                      {summary?.kill_switch_active ? "on" : "off"}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-zinc-500">Symbols</div>
-                    <div className="mt-1 text-sm font-medium text-zinc-100">
-                      {(status?.symbols || ["ETH/USDT", "XRP/USDT"]).join(", ")}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-sm text-zinc-500">Closed trades</div>
-                    <div className="mt-1 text-sm font-medium text-zinc-100">{summary?.total_trades ?? 0}</div>
-                  </div>
-                </div>
-              </div>
-              <div className="p-4">
-                <ServiceRow name="Trading agent" state={status?.trading_agent} />
-                <ServiceRow name="Backend" state={status?.webapi} />
-                <ServiceRow name="Dashboard" state={status?.dashboard} />
-                <ServiceRow name="Nginx" state={status?.nginx} />
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-zinc-800 bg-[#171717]">
-            <div className="border-b border-zinc-800 px-4 py-3">
-              <div className="font-medium text-zinc-100">Risk</div>
-            </div>
-            <div className="space-y-3 p-4 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-zinc-500">Risk per trade</span>
-                <span className="font-medium text-zinc-100">1.5%</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-zinc-500">Max daily drawdown</span>
-                <span className="font-medium text-zinc-100">5%</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-zinc-500">Default leverage</span>
-                <span className="font-medium text-zinc-100">3x</span>
-              </div>
-              <div className="flex justify-between gap-4">
-                <span className="text-zinc-500">Max positions</span>
-                <span className="font-medium text-zinc-100">1</span>
-              </div>
-            </div>
-          </section>
+        {/* Stat cards */}
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <StatCard label="Agent" value={serviceText(status?.trading_agent)} color={serviceColor(status?.trading_agent)} />
+          <StatCard label="Mode" value={status?.testnet ? "Testnet" : "Live"} color={status?.testnet ? "var(--amber)" : "var(--red)"} />
+          <StatCard label="Bankroll" value={`$${money.format(summary?.bankroll_usdt ?? 1000)}`} sub="USDT" />
+          <StatCard label="ROI" value={`${(summary?.roi_pct ?? 0) >= 0 ? "+" : ""}${(summary?.roi_pct ?? 0).toFixed(2)}%`} color={pnlColor(summary?.roi_pct ?? 0)} />
+          <StatCard label="Win Rate" value={`${(summary?.win_rate_pct ?? 0).toFixed(1)}%`} sub={`${summary?.total_trades ?? 0} trades`} />
+          <StatCard label="Positions" value={String(summary?.open_positions ?? 0)} color={(summary?.open_positions ?? 0) > 0 ? "var(--amber)" : "var(--text)"} />
         </div>
 
-        <section className="mt-5 rounded-lg border border-zinc-800 bg-[#171717]">
-          <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-            <div className="font-medium text-zinc-100">Open positions</div>
-            <span className="text-sm text-zinc-500">{openTrades.length}</span>
-          </div>
-          <div className="px-4">
-            {openTrades.length > 0 ? (
-              openTrades.map((trade) => <OpenPosition key={trade.id} trade={trade} />)
-            ) : (
-              <div className="py-5 text-sm text-zinc-500">No active positions.</div>
-            )}
-          </div>
-        </section>
+        {/* Middle row */}
+        <div className="mb-5 grid gap-4 lg:grid-cols-3">
+          {/* Services */}
+          <Section title="Services">
+            <div className="py-2 space-y-0">
+              {[
+                { name: "Trading Agent", state: status?.trading_agent },
+                { name: "API Backend", state: status?.webapi },
+                { name: "Dashboard", state: status?.dashboard },
+                { name: "Nginx", state: status?.nginx },
+              ].map(({ name, state }) => (
+                <div key={name} style={{ borderBottom: "1px solid var(--border)" }} className="flex items-center justify-between py-2.5 last:border-b-0">
+                  <div className="flex items-center gap-2">
+                    <ServiceDot state={state} />
+                    <span style={{ color: "var(--muted)" }} className="text-sm">{name}</span>
+                  </div>
+                  <span className="text-sm font-medium" style={{ color: serviceColor(state) }}>{serviceText(state)}</span>
+                </div>
+              ))}
+            </div>
+          </Section>
 
-        <section className="mt-5 rounded-lg border border-zinc-800 bg-[#171717]">
-          <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-            <div className="font-medium text-zinc-100">Recent closed trades</div>
-            <a href="/journal" className="text-sm text-zinc-400 hover:text-zinc-100">
-              Open journal
-            </a>
+          {/* Risk */}
+          <Section title="Risk">
+            <div className="py-2 space-y-0">
+              {[
+                { label: "Risk per trade", value: "1.5%" },
+                { label: "Max daily drawdown", value: "5%" },
+                { label: "Default leverage", value: "3×" },
+                { label: "Max positions", value: "1" },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ borderBottom: "1px solid var(--border)" }} className="flex items-center justify-between py-2.5 last:border-b-0">
+                  <span style={{ color: "var(--muted)" }} className="text-sm">{label}</span>
+                  <span className="text-sm font-medium tabular-nums">{value}</span>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          {/* Macro + Symbols */}
+          <Section title="Market regime">
+            <div className="py-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <span style={{ color: "var(--muted)" }} className="text-sm">Macro</span>
+                <MacroBadge regime={status?.macro_regime} />
+                {(!status?.macro_regime || status.macro_regime === "normal") && (
+                  <Badge color="var(--green)">Normal</Badge>
+                )}
+              </div>
+              <div>
+                <div style={{ color: "var(--muted)" }} className="text-sm mb-2">Active symbols</div>
+                <div className="flex flex-wrap gap-2">
+                  {(status?.symbols || ["ETH/USDT", "XRP/USDT"]).map(s => (
+                    <Badge key={s} color="var(--accent)">{s.replace("/USDT", "")}</Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span style={{ color: "var(--muted)" }} className="text-sm">Kill switch</span>
+                <Badge color={killActive ? "var(--red)" : "var(--green)"}>{killActive ? "ON" : "OFF"}</Badge>
+              </div>
+            </div>
+          </Section>
+        </div>
+
+        {/* Open positions */}
+        <div className="mb-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
+              Open Positions
+              <span className="ml-2 font-normal normal-case">{openTrades.length > 0 ? `(${openTrades.length})` : ""}</span>
+            </h2>
           </div>
-          <div className="px-4">
-            {closedTrades.length > 0 ? (
-              closedTrades.map((trade) => <RecentTrade key={trade.id} trade={trade} />)
-            ) : (
-              <div className="py-5 text-sm text-zinc-500">No closed trades yet.</div>
-            )}
-          </div>
-        </section>
+          {openTrades.length > 0 ? (
+            <div className="space-y-3">
+              {openTrades.map(t => <OpenPosition key={t.id} trade={t} />)}
+            </div>
+          ) : (
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted)" }}
+              className="rounded-xl px-5 py-8 text-sm text-center">
+              No active positions — bot is scanning for setups
+            </div>
+          )}
+        </div>
+
+        {/* Recent trades */}
+        <Section
+          title="Recent Closed Trades"
+          right={<a href="/journal" style={{ color: "var(--accent)" }} className="text-xs hover:opacity-80">View all →</a>}
+        >
+          {closedTrades.length > 0 ? (
+            closedTrades.map(t => <TradeRow key={t.id} trade={t} />)
+          ) : (
+            <div style={{ color: "var(--muted)" }} className="py-8 text-sm text-center">
+              No closed trades yet
+            </div>
+          )}
+        </Section>
+
       </main>
     </div>
   );
 }
 
 export default function Page() {
-  return (
-    <AuthGate>
-      <DashboardContent />
-    </AuthGate>
-  );
+  return <AuthGate><DashboardContent /></AuthGate>;
 }
