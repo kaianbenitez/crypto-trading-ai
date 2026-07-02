@@ -469,7 +469,11 @@ function Dashboard() {
               <div style={{ padding: "12px 0" }}>
                 <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Active symbols</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {(status?.symbols?.length ? status.symbols : ["ETH/USDT", "XRP/USDT"]).map(s => (
+                  {(status?.symbols?.length ? status.symbols : [
+                    "BTC/USDT","ETH/USDT","XRP/USDT","SOL/USDT","ADA/USDT",
+                    "BNB/USDT","DOGE/USDT","AVAX/USDT","LINK/USDT","DOT/USDT",
+                    "POL/USDT","LTC/USDT","UNI/USDT","ATOM/USDT","FIL/USDT",
+                  ]).map(s => (
                     <div key={s} style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 8px" }}>
                       <CoinLogo symbol={s} size={16} />
                       <span style={{ fontSize: 12, fontWeight: 600 }}>{s.replace("/USDT", "")}</span>
