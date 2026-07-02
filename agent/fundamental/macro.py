@@ -88,13 +88,11 @@ def assess_macro(adapter=None) -> MacroState:
     if fg is not None:
         state.fear_greed = fg
         if fg <= EXTREME_FEAR_THRESHOLD:
-            notes.append(f"Extreme Fear ({fg}) — reducing size, avoiding shorts")
+            notes.append(f"Extreme Fear ({fg}) — reducing size only (direction left to MTF/structure)")
             state.regime = "extreme_fear"
-            state.block_shorts = True  # don't pile on in capitulation
         elif fg >= EXTREME_GREED_THRESHOLD:
-            notes.append(f"Extreme Greed ({fg}) — reducing size, avoiding longs")
+            notes.append(f"Extreme Greed ({fg}) — reducing size only (direction left to MTF/structure)")
             state.regime = "extreme_greed"
-            state.block_longs = True  # don't chase euphoria tops
 
     # Funding rate
     if adapter:
