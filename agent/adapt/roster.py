@@ -200,8 +200,6 @@ class CoinRoster:
             digest += "\n" + "\n".join(messages)
 
         log.info(digest)
-        if tg_fn:
-            tg_fn(digest)
 
         return messages
 
