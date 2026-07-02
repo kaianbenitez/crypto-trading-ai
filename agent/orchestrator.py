@@ -575,8 +575,14 @@ def run():
                 state.last_candle = now_candle
 
             except Exception as e:
-                log.error(f"[{symbol}] Unhandled error in main loop: {e}", exc_info=True)
-                _tg(f"⚠️ [{symbol}] Loop error: {e}")
+                if "BadSymbol" in type(e).__name__ or "does not have market symbol" in str(e):
+                    log.warning(f"[{symbol}] BadSymbol — auto-benching and removing from active roster")
+                    roster._bench(symbol, "BadSymbol on exchange")
+                    states.pop(symbol, None)
+                    _tg(f"🚫 [{symbol}] auto-benched: not available on exchange")
+                else:
+                    log.error(f"[{symbol}] Unhandled error in main loop: {e}", exc_info=True)
+                    _tg(f"⚠️ [{symbol}] Loop error: {e}")
 
         # Heartbeat
         if cycle % heartbeat_every == 0:
