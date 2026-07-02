@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import NavBar from "./components/NavBar";
 import { AgentStatus, api, Summary, Trade } from "@/lib/api";
 
@@ -17,26 +17,44 @@ function pnlColor(v: number) { return v > 0 ? "var(--green)" : v < 0 ? "var(--re
 
 function Badge({ children, color }: { children: React.ReactNode; color?: string }) {
   return (
-    <span style={{ color: color || "var(--muted)", background: color ? color + "18" : "var(--surface2)", border: `1px solid ${color ? color + "30" : "var(--border)"}` }}
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium">
+    <span
+      style={{
+        color: color || "var(--muted)",
+        background: color ? color + "18" : "var(--surface2)",
+        border: `1px solid ${color ? color + "30" : "var(--border)"}`,
+      }}
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
+    >
       {children}
     </span>
   );
 }
 
-function StatCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+function StatCard({ label, value, sub, color, loading }: {
+  label: string; value: string; sub?: string; color?: string; loading?: boolean;
+}) {
   return (
     <div style={{ background: "var(--surface)", border: "1px solid var(--border)" }} className="rounded-xl p-4">
       <div style={{ color: "var(--muted)" }} className="text-xs font-medium uppercase tracking-wider">{label}</div>
-      <div style={{ color: color || "var(--text)" }} className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
-      {sub && <div style={{ color: "var(--muted)" }} className="mt-1 text-xs">{sub}</div>}
+      {loading ? (
+        <div style={{ background: "var(--border)", borderRadius: 4, width: "60%", height: 28, marginTop: 8 }} />
+      ) : (
+        <div style={{ color: color || "var(--text)" }} className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
+      )}
+      {sub && !loading && <div style={{ color: "var(--muted)" }} className="mt-1 text-xs">{sub}</div>}
     </div>
   );
 }
 
 function ServiceDot({ state }: { state?: string }) {
+  const label = serviceText(state);
   return (
-    <span className="inline-block h-2 w-2 rounded-full" style={{ background: serviceColor(state) }} />
+    <span
+      className="inline-block h-2 w-2 rounded-full flex-shrink-0"
+      style={{ background: serviceColor(state) }}
+      aria-label={label}
+      role="img"
+    />
   );
 }
 
@@ -134,28 +152,78 @@ function DashboardContent() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
+  const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const confirmCancelRef = useRef<HTMLButtonElement>(null);
 
   async function load() {
     try {
       const [s, st, t] = await Promise.all([api.summary(), api.agentStatus(), api.trades(10)]);
       setSummary(s); setStatus(st); setTrades(t); setError(null);
-    } catch { setError("Could not reach API"); }
+    } catch {
+      setError("Could not reach API — retrying every 15s");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { load(); const i = setInterval(load, 15000); return () => clearInterval(i); }, []);
+  useEffect(() => {
+    load();
+    const i = setInterval(load, 15000);
+    return () => clearInterval(i);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function toggleKillSwitch() {
-    if (!summary) return;
+  // Dismiss confirm on Escape
+  useEffect(() => {
+    if (!confirmingHalt) return;
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setConfirmingHalt(false); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmingHalt]);
+
+  async function requestHalt() {
+    if (confirmingHalt) return; // already showing confirm
+    setConfirmingHalt(true);
+    // Move focus to cancel so Escape is natural
+    setTimeout(() => confirmCancelRef.current?.focus(), 0);
+  }
+
+  async function confirmHalt() {
+    setConfirmingHalt(false);
     setToggling(true);
-    try { await api.setKillSwitch(!summary.kill_switch_active, "manual toggle"); await load(); }
-    finally { setToggling(false); }
+    setToggleError(null);
+    try {
+      await api.setKillSwitch(true, "manual halt");
+      await load();
+    } catch {
+      setToggleError("Halt command failed — bot may still be active. Reload and retry, or check server logs.");
+    } finally {
+      setToggling(false);
+    }
+  }
+
+  async function resumeTrading() {
+    setToggling(true);
+    setToggleError(null);
+    try {
+      await api.setKillSwitch(false, "manual resume");
+      await load();
+    } catch {
+      setToggleError("Resume command failed — bot may still be halted. Reload and retry, or check server logs.");
+    } finally {
+      setToggling(false);
+    }
   }
 
   const lastChecked = useMemo(() => {
     if (!status?.checked_at) return "—";
-    return new Date(status.checked_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const d = new Date(status.checked_at);
+    return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " +
+      d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }, [status?.checked_at]);
 
   const openTrades = trades.filter(t => !t.closed_at);
@@ -165,6 +233,23 @@ function DashboardContent() {
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)" }}>
       <NavBar />
+
+      {/* HALTED banner — dominant when kill switch is on */}
+      {killActive && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            background: "rgba(239,68,68,0.10)",
+            borderBottom: "1px solid rgba(239,68,68,0.35)",
+            color: "var(--red)",
+          }}
+          className="px-4 py-2.5 text-sm font-medium text-center tracking-wide"
+        >
+          ▐▐ TRADING HALTED — all new entries blocked
+        </div>
+      )}
+
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
 
         {/* Header */}
@@ -172,36 +257,137 @@ function DashboardContent() {
           <div>
             <h1 className="text-xl font-semibold">Dashboard</h1>
             <p style={{ color: "var(--muted)" }} className="mt-1 text-sm">
-              Last updated {lastChecked} · Testnet
+              {loading ? "Connecting…" : `Last updated ${lastChecked} · Testnet`}
             </p>
           </div>
-          <button
-            onClick={toggleKillSwitch}
-            disabled={toggling}
-            style={{
-              background: killActive ? "rgba(239,68,68,0.12)" : "var(--surface)",
-              border: `1px solid ${killActive ? "rgba(239,68,68,0.4)" : "var(--border2)"}`,
-              color: killActive ? "var(--red)" : "var(--text)",
-            }}
-            className="rounded-lg px-4 py-2 text-sm font-medium transition-all hover:opacity-80 disabled:opacity-50"
-          >
-            {killActive ? "▐▐  Resume trading" : "⏹  Halt new entries"}
-          </button>
+
+          {/* Kill switch — two-step confirm */}
+          <div className="flex items-center gap-2">
+            {confirmingHalt ? (
+              <>
+                <span style={{ color: "var(--muted)" }} className="text-sm">Confirm halt?</span>
+                <button
+                  onClick={confirmHalt}
+                  disabled={toggling}
+                  aria-label="Confirm halt — stop all new entries"
+                  style={{
+                    background: "rgba(239,68,68,0.15)",
+                    border: "1px solid rgba(239,68,68,0.5)",
+                    color: "var(--red)",
+                  }}
+                  className="rounded-lg px-3 py-2 text-sm font-medium hover:opacity-80 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  Yes, halt
+                </button>
+                <button
+                  ref={confirmCancelRef}
+                  onClick={() => setConfirmingHalt(false)}
+                  aria-label="Cancel halt"
+                  style={{ background: "var(--surface)", border: "1px solid var(--border2)", color: "var(--text)" }}
+                  className="rounded-lg px-3 py-2 text-sm font-medium hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : killActive ? (
+              <button
+                onClick={resumeTrading}
+                disabled={toggling}
+                aria-label="Resume trading — re-enable new entries"
+                aria-pressed={true}
+                style={{
+                  background: "rgba(239,68,68,0.12)",
+                  border: "1px solid rgba(239,68,68,0.4)",
+                  color: "var(--red)",
+                }}
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              >
+                {toggling ? "Resuming…" : "▐▐  Resume trading"}
+              </button>
+            ) : (
+              <button
+                onClick={requestHalt}
+                disabled={toggling || loading}
+                aria-label="Halt new entries — stop the bot from opening new positions"
+                aria-pressed={false}
+                style={{ background: "var(--surface)", border: "1px solid var(--border2)", color: "var(--text)" }}
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-opacity hover:opacity-80 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              >
+                {toggling ? "Halting…" : "⏹  Halt new entries"}
+              </button>
+            )}
+          </div>
         </div>
 
+        {/* API error */}
         {error && (
-          <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--red)" }}
-            className="mb-5 rounded-lg px-4 py-3 text-sm">{error}</div>
+          <div
+            role="alert"
+            aria-live="assertive"
+            style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--red)" }}
+            className="mb-5 rounded-lg px-4 py-3 text-sm flex items-center justify-between gap-4"
+          >
+            <span>{error}</span>
+            <button
+              onClick={load}
+              style={{ color: "var(--red)", textDecoration: "underline", background: "none", border: "none", cursor: "pointer" }}
+              className="text-sm shrink-0 hover:opacity-70"
+            >
+              Retry now
+            </button>
+          </div>
+        )}
+
+        {/* Toggle error */}
+        {toggleError && (
+          <div
+            role="alert"
+            aria-live="assertive"
+            style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--red)" }}
+            className="mb-5 rounded-lg px-4 py-3 text-sm"
+          >
+            {toggleError}
+          </div>
         )}
 
         {/* Stat cards */}
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <StatCard label="Agent" value={serviceText(status?.trading_agent)} color={serviceColor(status?.trading_agent)} />
-          <StatCard label="Mode" value={status?.testnet ? "Testnet" : "Live"} color={status?.testnet ? "var(--amber)" : "var(--red)"} />
-          <StatCard label="Bankroll" value={`$${money.format(summary?.bankroll_usdt ?? 1000)}`} sub="USDT" />
-          <StatCard label="ROI" value={`${(summary?.roi_pct ?? 0) >= 0 ? "+" : ""}${(summary?.roi_pct ?? 0).toFixed(2)}%`} color={pnlColor(summary?.roi_pct ?? 0)} />
-          <StatCard label="Win Rate" value={`${(summary?.win_rate_pct ?? 0).toFixed(1)}%`} sub={`${summary?.total_trades ?? 0} trades`} />
-          <StatCard label="Positions" value={String(summary?.open_positions ?? 0)} color={(summary?.open_positions ?? 0) > 0 ? "var(--amber)" : "var(--text)"} />
+          <StatCard
+            label="Agent"
+            value={serviceText(status?.trading_agent)}
+            color={serviceColor(status?.trading_agent)}
+            loading={loading}
+          />
+          <StatCard
+            label="Mode"
+            value={status?.testnet ? "Testnet" : status ? "Live" : "—"}
+            color={status?.testnet ? "var(--amber)" : status ? "var(--red)" : undefined}
+            loading={loading}
+          />
+          <StatCard
+            label="Bankroll"
+            value={summary ? `$${money.format(summary.bankroll_usdt)}` : "—"}
+            sub="USDT"
+            loading={loading}
+          />
+          <StatCard
+            label="ROI"
+            value={summary ? `${summary.roi_pct >= 0 ? "+" : ""}${summary.roi_pct.toFixed(2)}%` : "—"}
+            color={summary ? pnlColor(summary.roi_pct) : undefined}
+            loading={loading}
+          />
+          <StatCard
+            label="Win Rate"
+            value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"}
+            sub={summary ? `${summary.total_trades} trades` : undefined}
+            loading={loading}
+          />
+          <StatCard
+            label="Positions"
+            value={summary ? String(summary.open_positions) : "—"}
+            color={summary && summary.open_positions > 0 ? "var(--amber)" : undefined}
+            loading={loading}
+          />
         </div>
 
         {/* Middle row */}
@@ -248,15 +434,16 @@ function DashboardContent() {
             <div className="py-4 space-y-4">
               <div className="flex items-center justify-between">
                 <span style={{ color: "var(--muted)" }} className="text-sm">Macro</span>
-                <MacroBadge regime={status?.macro_regime} />
-                {(!status?.macro_regime || status.macro_regime === "normal") && (
+                {(!status?.macro_regime || status.macro_regime === "normal") ? (
                   <Badge color="var(--green)">Normal</Badge>
+                ) : (
+                  <MacroBadge regime={status.macro_regime} />
                 )}
               </div>
               <div>
                 <div style={{ color: "var(--muted)" }} className="text-sm mb-2">Active symbols</div>
                 <div className="flex flex-wrap gap-2">
-                  {(status?.symbols || ["ETH/USDT", "XRP/USDT"]).map(s => (
+                  {(status?.symbols && status.symbols.length > 0 ? status.symbols : ["ETH/USDT", "XRP/USDT"]).map(s => (
                     <Badge key={s} color="var(--accent)">{s.replace("/USDT", "")}</Badge>
                   ))}
                 </div>
@@ -272,9 +459,11 @@ function DashboardContent() {
         {/* Open positions */}
         <div className="mb-5">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: "var(--muted)" }}>
+            <h2 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
               Open Positions
-              <span className="ml-2 font-normal normal-case">{openTrades.length > 0 ? `(${openTrades.length})` : ""}</span>
+              {openTrades.length > 0 && (
+                <span className="ml-2 font-normal" style={{ color: "var(--muted)" }}>({openTrades.length})</span>
+              )}
             </h2>
           </div>
           {openTrades.length > 0 ? (
@@ -282,9 +471,11 @@ function DashboardContent() {
               {openTrades.map(t => <OpenPosition key={t.id} trade={t} />)}
             </div>
           ) : (
-            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted)" }}
-              className="rounded-xl px-5 py-8 text-sm text-center">
-              No active positions — bot is scanning for setups
+            <div
+              style={{ background: "var(--surface)", border: "1px solid var(--border)", color: "var(--muted)" }}
+              className="rounded-xl px-5 py-8 text-sm text-center"
+            >
+              {loading ? "Loading positions…" : "No active positions — bot is scanning for setups"}
             </div>
           )}
         </div>
@@ -294,7 +485,9 @@ function DashboardContent() {
           title="Recent Closed Trades"
           right={<a href="/journal" style={{ color: "var(--accent)" }} className="text-xs hover:opacity-80">View all →</a>}
         >
-          {closedTrades.length > 0 ? (
+          {loading ? (
+            <div style={{ color: "var(--muted)" }} className="py-8 text-sm text-center">Loading…</div>
+          ) : closedTrades.length > 0 ? (
             closedTrades.map(t => <TradeRow key={t.id} trade={t} />)
           ) : (
             <div style={{ color: "var(--muted)" }} className="py-8 text-sm text-center">
@@ -304,6 +497,15 @@ function DashboardContent() {
         </Section>
 
       </main>
+
+      <style>{`
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            transition-duration: 0.01ms !important;
+            animation-duration: 0.01ms !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
