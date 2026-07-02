@@ -5,11 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/trading-ai
-Environment=PYTHONPATH=/home/ubuntu/trading-ai
-EnvironmentFile=/home/ubuntu/trading-ai/.env
-ExecStart=/home/ubuntu/trading-ai/venv/bin/python -m agent.orchestrator
+User=root
+WorkingDirectory=/root/trading-ai
+Environment=PYTHONPATH=/root/trading-ai
+EnvironmentFile=/root/trading-ai/.env
+ExecStart=/root/trading-ai/venv/bin/python -m agent.orchestrator
 Restart=on-failure
 RestartSec=15
 StandardOutput=journal
