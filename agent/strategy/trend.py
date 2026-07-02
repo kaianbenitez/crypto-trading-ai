@@ -50,31 +50,38 @@ def trend_signal(row: pd.Series, prev: pd.Series, params: dict) -> Signal:
             indicator_snapshot=snapshot, strategy_name="trend_following",
         )
 
-    # --- Tier 2: trend persistently aligned (lower confidence, needs ADX) ---
-    if ema_bull and macd_bull and vol_ok and adx_ok:
+    # --- Tier 2: trend persistently aligned (ADX gates quality; no vol gate — low vol ≠ no trend) ---
+    if ema_bull and macd_bull and adx_ok:
         return Signal(
             Side.LONG, confidence=0.55,
             reasoning=[
                 "EMA fast above EMA slow — bullish trend intact",
                 "MACD above signal line, momentum positive",
-                f"ADX {row.get('adx', 0):.1f} confirms trend is directional",
+                f"ADX {row.get('adx', 0):.1f} confirms directional trend",
             ],
             indicator_snapshot=snapshot, strategy_name="trend_following",
         )
 
-    if ema_bear and macd_bear and vol_ok and adx_ok:
+    if ema_bear and macd_bear and adx_ok:
         return Signal(
             Side.SHORT, confidence=0.55,
             reasoning=[
                 "EMA fast below EMA slow — bearish trend intact",
                 "MACD below signal line, momentum negative",
-                f"ADX {row.get('adx', 0):.1f} confirms trend is directional",
+                f"ADX {row.get('adx', 0):.1f} confirms directional trend",
             ],
             indicator_snapshot=snapshot, strategy_name="trend_following",
         )
 
+    # Log exactly which condition failed
+    reasons = []
+    if not adx_ok:   reasons.append(f"ADX {row.get('adx', 0):.1f} < 20 (weak trend)")
+    if not (ema_bull or ema_bear): reasons.append("EMA fast/slow not aligned")
+    elif ema_bull and not macd_bull: reasons.append("EMA bullish but MACD not confirming")
+    elif ema_bear and not macd_bear: reasons.append("EMA bearish but MACD not confirming")
+
     return Signal(
         Side.NONE, confidence=0.0,
-        reasoning=["No qualifying EMA/MACD alignment with volume and ADX confirmation"],
+        reasoning=[f"No trend signal: {'; '.join(reasons) or 'mixed conditions'}"],
         indicator_snapshot=snapshot, strategy_name="trend_following",
     )
