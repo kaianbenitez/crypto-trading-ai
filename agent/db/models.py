@@ -60,6 +60,28 @@ class Trade(Base):
         return json.loads(self.postmortem) if self.postmortem else []
 
 
+class IndicatorWeight(Base):
+    """Per-symbol, per-regime learned indicator weights."""
+    __tablename__ = "indicator_weights"
+
+    id          = Column(Integer, primary_key=True)
+    symbol      = Column(String, nullable=False, index=True)
+    regime      = Column(String, nullable=False)
+    weights     = Column(Text, nullable=False)   # JSON dict {indicator: weight}
+    trade_count = Column(Integer, default=0)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class RosterState(Base):
+    """Coin roster state — active and benched symbols."""
+    __tablename__ = "roster_state"
+
+    id             = Column(Integer, primary_key=True)
+    active_symbols = Column(Text, nullable=False)   # JSON list
+    benched_symbols= Column(Text, nullable=False)   # JSON dict {symbol: bench_until_iso}
+    last_review    = Column(DateTime, nullable=True)
+
+
 class TradeMemory(Base):
     __tablename__ = "trade_memory"
 

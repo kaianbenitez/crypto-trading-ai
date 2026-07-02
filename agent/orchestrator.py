@@ -44,6 +44,9 @@ from agent.strategy.signal import Side
 from agent.strategy.smc import add_smc
 from agent.backtest.validate import BASE_PARAMS
 from agent.adapt.memory import save_lesson, apply_memory
+from agent.adapt.weights import update_weights, apply_weights
+from agent.adapt.roster import CoinRoster, CANDIDATE_SYMBOLS
+from agent.fundamental.macro import assess_macro
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -348,6 +351,23 @@ def _check_close(
     except Exception as e:
         log.warning(f"[{state.symbol}] Memory save failed: {e}")
 
+    # Update adaptive indicator weights
+    try:
+        update_weights(trade, session)
+        log.info(f"[{state.symbol}] Indicator weights updated")
+    except Exception as e:
+        log.warning(f"[{state.symbol}] Weight update failed: {e}")
+
+    # Update roster with trade outcome (may bench if consecutive losses)
+    try:
+        from agent.adapt.roster import CoinRoster as _Roster
+        _roster = _Roster(session)
+        bench_msg = _roster.record_trade(state.symbol, outcome)
+        if bench_msg:
+            _tg(bench_msg)
+    except Exception as e:
+        log.warning(f"[{state.symbol}] Roster update failed: {e}")
+
     emoji = "✅" if outcome == "win" else "❌"
     msg = (
         f"{emoji} {state.symbol} {trade.side.upper()} CLOSED\n"
@@ -382,7 +402,8 @@ def run():
     else:
         adapter = BinanceFuturesAdapter()
         log.info("Exchange: Binance Futures")
-    session  = get_session()
+
+    session = get_session()
     exch_settings = SimpleSettings(
         bankroll_usdt=settings.bankroll_usdt,
         max_risk_per_trade_pct=settings.max_risk_per_trade_pct,
@@ -392,16 +413,35 @@ def run():
         max_leverage=settings.max_leverage,
     )
     risk   = RiskEngine(exch_settings)
-    states = {s: SymbolState(s) for s in SYMBOLS}
+    roster = CoinRoster(session, adapter)
+    states: dict[str, SymbolState] = {s: SymbolState(s) for s in roster.get_active()}
 
-    heartbeat_every = 6   # log heartbeat every N cycles (~6h)
+    heartbeat_every  = 6    # log heartbeat every N cycles (~6h)
+    daily_review_every = 24  # roster + macro review every 24 cycles (~24h)
     cycle = 0
+    macro = assess_macro(adapter)  # initial macro check
+
+    log.info(f"Roster: {roster.get_active()}")
+    _tg(f"🤖 Trading bot started\nSymbols: {', '.join(roster.get_active())}\nMacro: {macro.regime}")
 
     while True:
         cycle += 1
         now_candle = _candle_close_timestamp(TIMEFRAME)
 
-        for symbol, state in states.items():
+        # --- Daily roster + macro review ---
+        if cycle % daily_review_every == 0:
+            macro = assess_macro(adapter)
+            roster.daily_review(tg_fn=_tg)
+            # Sync states dict with updated roster
+            for sym in roster.get_active():
+                if sym not in states:
+                    states[sym] = SymbolState(sym)
+            for sym in list(states.keys()):
+                if sym not in roster.get_active():
+                    del states[sym]
+            log.info(f"Macro regime: {macro.regime} | size_mult={macro.size_multiplier:.2f}")
+
+        for symbol, state in list(states.items()):
             try:
                 # Check kill-switch from DB (in case dashboard toggled it)
                 from webapi.app_state import get_or_create_state as get_agent_state
@@ -497,11 +537,38 @@ def run():
                         state.last_candle = now_candle
                         continue
 
+                    # --- Adaptive indicator weights ---
+                    try:
+                        weight_delta = apply_weights(signal, row, symbol, session)
+                        if weight_delta != 0:
+                            signal.confidence = max(0.0, min(1.0, signal.confidence + weight_delta))
+                            signal.indicator_snapshot["weight_delta"] = round(weight_delta, 2)
+                            log.info(f"[{symbol}] Weight delta: {weight_delta:+.2f} → confidence={signal.confidence:.2f}")
+                    except Exception as e:
+                        log.warning(f"[{symbol}] Weight apply failed (continuing): {e}")
+
+                    # --- Macro gate ---
+                    if macro.block_longs and signal.side == Side.LONG:
+                        log.info(f"[{symbol}] Macro blocked LONG: {macro.regime}")
+                        state.last_candle = now_candle
+                        continue
+                    if macro.block_shorts and signal.side == Side.SHORT:
+                        log.info(f"[{symbol}] Macro blocked SHORT: {macro.regime}")
+                        state.last_candle = now_candle
+                        continue
+
+                    # Apply macro size multiplier to params
+                    trade_params = dict(state.params)
+                    if macro.size_multiplier < 1.0:
+                        orig_risk = trade_params.get("max_risk_per_trade_pct", 1.5)
+                        trade_params["max_risk_per_trade_pct"] = round(orig_risk * macro.size_multiplier, 3)
+                        log.info(f"[{symbol}] Macro size reduced: {orig_risk}% → {trade_params['max_risk_per_trade_pct']}%")
+
                     log.info(
                         f"[{symbol}] Signal: {signal.side.value.upper()} "
-                        f"confidence={signal.confidence:.2f} — {signal.reasoning[0]}"
+                        f"confidence={signal.confidence:.2f} macro={macro.regime} — {signal.reasoning[0]}"
                     )
-                    _open_trade(adapter, session, risk, state, signal, row, state.params)
+                    _open_trade(adapter, session, risk, state, signal, row, trade_params)
                 else:
                     log.debug(f"[{symbol}] No signal this candle")
 
