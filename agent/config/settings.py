@@ -7,9 +7,18 @@ load_dotenv()
 
 @dataclass
 class Settings:
+    # Binance
     binance_api_key: str = os.getenv("BINANCE_API_KEY", "")
     binance_api_secret: str = os.getenv("BINANCE_API_SECRET", "")
     binance_testnet: bool = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
+
+    # Bybit
+    bybit_api_key: str = os.getenv("BYBIT_API_KEY", "")
+    bybit_api_secret: str = os.getenv("BYBIT_API_SECRET", "")
+    bybit_testnet: bool = os.getenv("BYBIT_TESTNET", "true").lower() == "true"
+
+    # Which exchange to use: "binance" or "bybit"
+    exchange: str = os.getenv("EXCHANGE", "bybit")
 
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")

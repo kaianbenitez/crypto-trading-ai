@@ -34,6 +34,7 @@ from agent.config.settings import settings
 from agent.backtest.engine import SimpleSettings
 from agent.db.models import Trade, get_session
 from agent.exchange.binance_futures import BinanceFuturesAdapter
+from agent.exchange.bybit_futures import BybitFuturesAdapter
 from agent.fundamental.market_context import add_market_context
 from agent.risk.engine import RiskEngine
 from agent.strategy.ensemble import generate_signal
@@ -375,7 +376,12 @@ def run():
     log.info("=" * 60)
     _tg(f"🤖 Trading bot started\nSymbols: {', '.join(SYMBOLS)}\nTestnet: {settings.binance_testnet}")
 
-    adapter = BinanceFuturesAdapter()
+    if settings.exchange == "bybit":
+        adapter = BybitFuturesAdapter()
+        log.info("Exchange: Bybit Futures")
+    else:
+        adapter = BinanceFuturesAdapter()
+        log.info("Exchange: Binance Futures")
     session  = get_session()
     exch_settings = SimpleSettings(
         bankroll_usdt=settings.bankroll_usdt,
