@@ -123,7 +123,11 @@ def agent_status():
         nginx=_service_state("nginx"),
         exchange=settings.exchange,
         testnet=settings.binance_testnet,
-        symbols=["ETH/USDT", "XRP/USDT"],
+        symbols=[
+            "BTC/USDT", "ETH/USDT", "XRP/USDT", "SOL/USDT", "ADA/USDT",
+            "BNB/USDT", "DOGE/USDT", "AVAX/USDT", "LINK/USDT", "DOT/USDT",
+            "POL/USDT", "LTC/USDT", "UNI/USDT", "ATOM/USDT", "FIL/USDT",
+        ],
         bankroll_usdt=settings.bankroll_usdt,
         checked_at=datetime.now(timezone.utc).isoformat(),
     )

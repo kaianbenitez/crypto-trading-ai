@@ -90,9 +90,9 @@ function StatCard({
   return (
     <div style={{
       background: accent
-        ? `linear-gradient(135deg, ${accent}14 0%, var(--surface) 70%)`
+        ? `linear-gradient(135deg, ${accent}28 0%, ${accent}08 60%, var(--surface) 100%)`
         : "var(--surface)",
-      border: `1px solid ${accent ? accent + "25" : "var(--border)"}`,
+      border: `1px solid ${accent ? accent + "35" : "var(--border)"}`,
       borderRadius: 14,
       padding: large ? "20px 20px" : "14px 16px",
       position: "relative",
