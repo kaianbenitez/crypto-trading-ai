@@ -67,6 +67,8 @@ export interface AgentStatus {
   exchange: string;
   testnet: boolean;
   symbols: string[];
+  macro_regime?: string;
+  kill_switch_active?: boolean;
   bankroll_usdt: number;
   checked_at: string;
 }
