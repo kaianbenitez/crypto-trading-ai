@@ -1,17 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --bg:        #0a0c0f;
-  --surface:   #111318;
-  --surface2:  #161a21;
-  --border:    #1e2330;
-  --border2:   #252c3a;
-  --text:      #e8eaf0;
-  --muted:     #5a6278;
+  --bg:        #080a0d;
+  --surface:   #0e1117;
+  --surface2:  #141820;
+  --surface3:  #1a2030;
+  --border:    #1e2533;
+  --border2:   #27304a;
+  --text:      #e2e6f0;
+  --muted:     #4a5570;
   --accent:    #3b82f6;
+  --accent2:   #6366f1;
   --green:     #22c55e;
+  --green2:    #16a34a;
   --red:       #ef4444;
+  --red2:      #dc2626;
   --amber:     #f59e0b;
+  --purple:    #a855f7;
 }
 
 @theme inline {
@@ -20,6 +25,8 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
+
+* { box-sizing: border-box; }
 
 body {
   background: var(--bg);
@@ -33,6 +40,32 @@ button, a {
 }
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* Pulse animation for active dots */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(0.85); }
+}
+.pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* Shimmer skeleton */
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to   { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
