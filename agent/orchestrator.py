@@ -570,7 +570,7 @@ def run():
                     )
                     _open_trade(adapter, session, risk, state, signal, row, trade_params)
                 else:
-                    log.debug(f"[{symbol}] No signal this candle")
+                    log.info(f"[{symbol}] No signal — {signal.reasoning[0] if signal.reasoning else 'no reason given'}")
 
                 state.last_candle = now_candle
 
