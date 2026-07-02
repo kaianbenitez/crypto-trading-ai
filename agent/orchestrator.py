@@ -1,26 +1,20 @@
 """Main orchestrator loop — runs the trading agent continuously.
 
-Cycle (every 1h candle close):
+Cycle (polls every 60s, evaluates at each 1h candle close):
   1. Fetch recent candles for each symbol
-  2. Run FA gate (ATR shock check via market context)
-  3. Run SMC + TA ensemble to generate signal
-  4. Risk engine gates sizing and kill-switch
-  5. Place market entry + exchange-side SL/TP orders (Binance holds these
-     even if this process is offline — safe for unattended operation)
-  6. Monitor open positions for fill confirmation
-  7. On close: log post-mortem, run bounded auto-tuner
-  8. Telegram alert on every meaningful event
+  2. Run ensemble signal (ATR shock → regime → TA → context → SMC)
+  3. MTF confluence gate
+  4. Memory + adaptive weight adjustments
+  5. Risk engine sizes and places entry + exchange-side SL/TP
+  6. Monitor open positions (BE arm, force-close after 48h)
+  7. On close: postmortem, auto-tuner, memory lesson, weight update
+  8. Self-monitoring: tracks idle hours, logs signal summaries
 
-Hard rules enforced here:
-  - Never modifies strategy logic or code — only numeric params via tuner
+Hard rules:
+  - Never modifies strategy logic — only numeric params via tuner
   - Kill-switch checked before every order
-  - Max 1 concurrent position per symbol, 1 symbol active at a time
+  - Max 1 concurrent position per symbol
   - Exchange-side SL/TP always placed immediately after entry fill
-
-Run with:
-  cd "Crypto Trading AI"
-  py -m agent.orchestrator
-  (or as a systemd service on the VPS)
 """
 import logging
 import time
@@ -54,13 +48,12 @@ from agent.fundamental.macro import assess_macro
 
 SYMBOLS    = ["ETH/USDT", "XRP/USDT"]
 TIMEFRAME  = "1h"
-CANDLES    = 200          # enough for all indicators + 120-candle context window
-POLL_SEC   = 60           # check for new candle every 60s
-USE_SMC    = True         # toggle SMC+Context filters (set False for baseline mode)
-USE_MTF    = True         # multi-timeframe confluence filter
-MTF_MIN_CONFLUENCE = 55   # minimum weighted score to allow entry
-BE_TRIGGER_R    = 1.0     # arm breakeven after +1R unrealised profit
-MAX_TRADE_HOURS = 48      # force-close if trade still open after this many hours
+CANDLES    = 200
+POLL_SEC   = 60
+USE_SMC    = True
+USE_MTF    = True
+BE_TRIGGER_R    = 1.0
+MAX_TRADE_HOURS = 48
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,7 +67,7 @@ log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Telegram helper (optional — silently skipped if token not configured)
+# Telegram helper
 # ---------------------------------------------------------------------------
 
 def _tg(message: str) -> None:
@@ -96,7 +89,6 @@ def _tg(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _candle_close_timestamp(tf: str) -> int:
-    """Returns the UTC timestamp (ms) of the most recently closed 1h candle."""
     now_ms = int(time.time() * 1000)
     if tf == "1h":
         period_ms = 3_600_000
@@ -107,7 +99,7 @@ def _candle_close_timestamp(tf: str) -> int:
     return (now_ms // period_ms) * period_ms
 
 
-def _fetch_df(adapter: BinanceFuturesAdapter, symbol: str) -> pd.DataFrame:
+def _fetch_df(adapter, symbol: str) -> pd.DataFrame:
     candles = adapter.fetch_ohlcv(symbol, TIMEFRAME, limit=CANDLES)
     df = pd.DataFrame([{
         "open": c.open, "high": c.high, "low": c.low,
@@ -131,28 +123,19 @@ def _prepare_df(df: pd.DataFrame, params: dict) -> pd.DataFrame:
 class SymbolState:
     def __init__(self, symbol: str):
         self.symbol        = symbol
-        self.last_candle   = 0        # timestamp of last processed candle
-        self.open_trade_id = None     # DB Trade.id of the open position
+        self.last_candle   = 0
+        self.open_trade_id = None
         self.sl_order_id   = None
         self.tp_order_id   = None
         self.params        = dict(BASE_PARAMS, context_window_candles=120, max_atr_ratio=2.5)
-        self.be_armed      = False    # True once breakeven SL has been placed
+        self.be_armed      = False
 
 
 # ---------------------------------------------------------------------------
 # Trade lifecycle
 # ---------------------------------------------------------------------------
 
-def _open_trade(
-    adapter: BinanceFuturesAdapter,
-    session,
-    risk: RiskEngine,
-    state: SymbolState,
-    signal,
-    row: pd.Series,
-    params: dict,
-) -> bool:
-    """Size, place, and log a new entry. Returns True if order went through."""
+def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
     plan = risk.plan_trade(state.symbol, signal.side, row["close"], row["atr"])
 
     if not plan.approved:
@@ -163,7 +146,6 @@ def _open_trade(
         log.info(f"[{state.symbol}] Zero qty computed — skipping")
         return False
 
-    # Set leverage before entry
     try:
         adapter.set_leverage(state.symbol, plan.leverage)
     except Exception as e:
@@ -171,7 +153,6 @@ def _open_trade(
 
     entry_side = "buy" if signal.side == Side.LONG else "sell"
 
-    # Market entry
     try:
         entry = adapter.place_market_order(state.symbol, entry_side, plan.qty)
     except Exception as e:
@@ -181,7 +162,6 @@ def _open_trade(
 
     fill_price = entry.price or row["close"]
 
-    # Exchange-side SL/TP (held by Binance even if this process goes offline)
     try:
         sl_order = adapter.place_stop_loss(state.symbol, entry_side, plan.qty, plan.stop_loss)
         state.sl_order_id = sl_order.order_id
@@ -195,7 +175,6 @@ def _open_trade(
     except Exception as e:
         log.warning(f"[{state.symbol}] Take-profit order failed: {e}")
 
-    # Log to DB
     trade = Trade(
         symbol=state.symbol,
         side=signal.side.value,
@@ -227,14 +206,7 @@ def _open_trade(
     return True
 
 
-def _check_close(
-    adapter: BinanceFuturesAdapter,
-    session,
-    risk: RiskEngine,
-    state: SymbolState,
-) -> bool:
-    """Check if the open position has been closed; also handles BE arm + force-close.
-    Returns True if position is now closed."""
+def _check_close(adapter, session, risk, state) -> bool:
     trade = session.get(Trade, state.open_trade_id)
     if not trade:
         return True
@@ -246,10 +218,9 @@ def _check_close(
         still_open = clean_sym in open_syms
     except Exception as e:
         log.warning(f"[{state.symbol}] get_open_positions failed: {e}")
-        still_open = True  # assume open if we can't check
+        still_open = True
 
     if still_open:
-        # --- Breakeven auto-arm ---
         if not state.be_armed:
             try:
                 candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=1)
@@ -264,7 +235,6 @@ def _check_close(
                         be_trigger_r=BE_TRIGGER_R, atr_mult_sl=atr_mult_sl,
                     )
                     if new_sl is not None:
-                        # Cancel old SL order and place new one at breakeven
                         be_side = "sell" if trade.side == "long" else "buy"
                         try:
                             if state.sl_order_id:
@@ -279,7 +249,6 @@ def _check_close(
             except Exception as e:
                 log.warning(f"[{state.symbol}] BE check failed: {e}")
 
-        # --- Time-based force close ---
         if trade.opened_at:
             hours_open = (datetime.now(timezone.utc) - trade.opened_at).total_seconds() / 3600
             if hours_open >= MAX_TRADE_HOURS:
@@ -288,7 +257,6 @@ def _check_close(
                 try:
                     close_side = "sell" if trade.side == "long" else "buy"
                     adapter.place_market_order(state.symbol, close_side, trade.qty)
-                    # Cancel outstanding SL/TP
                     for oid in [state.sl_order_id, state.tp_order_id]:
                         if oid:
                             try:
@@ -298,13 +266,11 @@ def _check_close(
                 except Exception as e:
                     log.error(f"[{state.symbol}] Force-close order failed: {e}")
                     return False
-                still_open = False  # fall through to close logic below
+                still_open = False
 
         if still_open:
             return False
 
-    # Position is gone — closed by exchange (SL/TP triggered) or force-closed above
-    # Determine exit price and reason from the current market price (approximation)
     try:
         candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=1)
         exit_price = candles[-1].close if candles else trade.entry_price
@@ -313,7 +279,6 @@ def _check_close(
 
     direction  = 1 if trade.side == "long" else -1
     raw_pnl    = (exit_price - trade.entry_price) * direction * trade.qty
-    # Estimate exit reason: if pnl negative hit SL, if positive hit TP
     exit_reason = "take_profit" if raw_pnl > 0 else "stop_loss"
     outcome     = "win" if raw_pnl > 0 else ("loss" if raw_pnl < 0 else "breakeven")
 
@@ -330,7 +295,6 @@ def _check_close(
     risk.record_trade_result(raw_pnl)
     risk.mark_position_closed(state.symbol)
 
-    # Auto-tune params from last 20 closed trades
     recent = (
         session.query(Trade)
         .filter(Trade.symbol == state.symbol, Trade.closed_at.isnot(None))
@@ -344,21 +308,18 @@ def _check_close(
         log.info(f"[{state.symbol}] Param nudge: {changes}")
     state.params = new_params
 
-    # Save per-symbol lesson to memory
     try:
         save_lesson(trade, session)
         log.info(f"[{state.symbol}] Memory lesson saved")
     except Exception as e:
         log.warning(f"[{state.symbol}] Memory save failed: {e}")
 
-    # Update adaptive indicator weights
     try:
         update_weights(trade, session)
         log.info(f"[{state.symbol}] Indicator weights updated")
     except Exception as e:
         log.warning(f"[{state.symbol}] Weight update failed: {e}")
 
-    # Update roster with trade outcome (may bench if consecutive losses)
     try:
         from agent.adapt.roster import CoinRoster as _Roster
         _roster = _Roster(session)
@@ -416,10 +377,11 @@ def run():
     roster = CoinRoster(session, adapter)
     states: dict[str, SymbolState] = {s: SymbolState(s) for s in roster.get_active()}
 
-    heartbeat_every  = 6    # log heartbeat every N cycles (~6h)
-    daily_review_every = 24  # roster + macro review every 24 cycles (~24h)
     cycle = 0
-    macro = assess_macro(adapter)  # initial macro check
+    macro = assess_macro(adapter)
+    candles_since_trade = 0
+    last_daily_review = 0      # UTC hour of last daily review
+    last_macro_update = 0      # UTC hour of last macro refresh
 
     log.info(f"Roster: {roster.get_active()}")
     _tg(f"🤖 Trading bot started\nSymbols: {', '.join(roster.get_active())}\nMacro: {macro.regime}")
@@ -427,48 +389,61 @@ def run():
     while True:
         cycle += 1
         now_candle = _candle_close_timestamp(TIMEFRAME)
+        now_utc = datetime.now(timezone.utc)
 
-        # --- Daily roster + macro review ---
-        if cycle % daily_review_every == 0:
+        # --- Macro refresh every 4 hours ---
+        if now_utc.hour != last_macro_update and now_utc.hour % 4 == 0:
             macro = assess_macro(adapter)
-            roster.daily_review(tg_fn=_tg)
-            # Sync states dict with updated roster
+            last_macro_update = now_utc.hour
+
+        # --- Daily roster review at 00:00 UTC ---
+        if now_utc.hour == 0 and now_utc.hour != last_daily_review:
+            roster.daily_review()
             for sym in roster.get_active():
                 if sym not in states:
                     states[sym] = SymbolState(sym)
             for sym in list(states.keys()):
                 if sym not in roster.get_active():
                     del states[sym]
-            log.info(f"Macro regime: {macro.regime} | size_mult={macro.size_multiplier:.2f}")
+            log.info(f"Daily review done. Active: {roster.get_active()}")
+            last_daily_review = now_utc.hour
+
+        # Track whether this cycle processes a new candle
+        new_candle_this_cycle = False
+        signal_summary = []
 
         for symbol, state in list(states.items()):
             try:
-                # Check kill-switch from DB (in case dashboard toggled it)
+                # Check kill-switch from DB
                 from webapi.app_state import get_or_create_state as get_agent_state
                 try:
                     agent_state = get_agent_state(session)
                     if agent_state.kill_switch_active:
                         risk.kill_switch_active = True
                 except Exception:
-                    pass  # webapi state table may not exist yet
+                    pass
 
                 # --- Monitor open position ---
                 if state.open_trade_id is not None:
                     _check_close(adapter, session, risk, state)
-                    continue  # one position per symbol at a time
+                    continue
 
                 # --- Only act on a new candle close ---
                 if now_candle <= state.last_candle:
                     continue
 
+                new_candle_this_cycle = True
+
                 # --- Fetch + prepare data ---
                 df = _fetch_df(adapter, symbol)
                 if len(df) < 50:
                     log.warning(f"[{symbol}] Not enough candles ({len(df)}), skipping")
+                    state.last_candle = now_candle
                     continue
 
                 df = _prepare_df(df, state.params)
                 if len(df) < 2:
+                    state.last_candle = now_candle
                     continue
 
                 row  = df.iloc[-1]
@@ -491,7 +466,6 @@ def run():
                             raw_1h = _fetch_df(adapter, symbol)
                             for tf in ("4h", "1d"):
                                 tf_dfs[tf] = resample_ohlcv(raw_1h, tf)
-                            # Fetch 4h directly for more candles
                             candles_4h = adapter.fetch_ohlcv(symbol, "4h", limit=100)
                             tf_dfs["4h"] = pd.DataFrame([{
                                 "open": c.open, "high": c.high, "low": c.low,
@@ -508,7 +482,8 @@ def run():
                             signal.indicator_snapshot["mtf_confluence"] = round(mtf["confluence_pct"], 1)
 
                             if not mtf["approved"]:
-                                log.info(f"[{symbol}] MTF blocked: {mtf['block_reason']}")
+                                log.info(f"[{symbol}] {signal.side.value.upper()} conf={signal.confidence:.2f} → MTF blocked: {mtf['block_reason']}")
+                                signal_summary.append(f"{symbol}: {signal.side.value.upper()} blocked by MTF (score={mtf['weighted_score']:.0f})")
                                 state.last_candle = now_candle
                                 continue
 
@@ -531,9 +506,9 @@ def run():
                     except Exception as e:
                         log.warning(f"[{symbol}] Memory check failed (continuing): {e}")
 
-                    # Block if memory tanked confidence below actionable threshold
                     if signal.confidence <= 0:
                         log.info(f"[{symbol}] Memory reduced confidence to zero — skipping")
+                        signal_summary.append(f"{symbol}: killed by memory")
                         state.last_candle = now_candle
                         continue
 
@@ -547,7 +522,7 @@ def run():
                     except Exception as e:
                         log.warning(f"[{symbol}] Weight apply failed (continuing): {e}")
 
-                    # --- Macro size adjustment (direction handled by MTF/structure) ---
+                    # --- Macro size adjustment ---
                     trade_params = dict(state.params)
                     if macro.size_multiplier < 1.0:
                         orig_risk = trade_params.get("max_risk_per_trade_pct", 1.5)
@@ -555,12 +530,19 @@ def run():
                         log.info(f"[{symbol}] Macro size reduced: {orig_risk}% → {trade_params['max_risk_per_trade_pct']}%")
 
                     log.info(
-                        f"[{symbol}] Signal: {signal.side.value.upper()} "
+                        f"[{symbol}] ✅ ENTRY SIGNAL: {signal.side.value.upper()} "
                         f"confidence={signal.confidence:.2f} macro={macro.regime} — {signal.reasoning[0]}"
                     )
-                    _open_trade(adapter, session, risk, state, signal, row, trade_params)
+                    opened = _open_trade(adapter, session, risk, state, signal, row, trade_params)
+                    if opened:
+                        candles_since_trade = 0
+                        signal_summary.append(f"{symbol}: {signal.side.value.upper()} OPENED")
+                    else:
+                        signal_summary.append(f"{symbol}: signal passed but risk engine rejected")
                 else:
-                    log.info(f"[{symbol}] No signal — {signal.reasoning[0] if signal.reasoning else 'no reason given'}")
+                    reason = signal.reasoning[0] if signal.reasoning else "no signal"
+                    log.info(f"[{symbol}] No signal — {reason}")
+                    signal_summary.append(f"{symbol}: {reason[:60]}")
 
                 state.last_candle = now_candle
 
@@ -574,8 +556,31 @@ def run():
                     log.error(f"[{symbol}] Unhandled error in main loop: {e}", exc_info=True)
                     _tg(f"⚠️ [{symbol}] Loop error: {e}")
 
-        # Heartbeat
-        if cycle % heartbeat_every == 0:
+        # --- Self-awareness: candle summary ---
+        if new_candle_this_cycle:
+            candles_since_trade += 1
+            log.info(
+                f"📊 Candle summary (idle {candles_since_trade}h) | macro={macro.regime} "
+                f"size={macro.size_multiplier:.2f} | {len(signal_summary)} symbols evaluated"
+            )
+            for s in signal_summary:
+                log.info(f"  → {s}")
+
+            # Self-awareness alert: if idle for 24+ hours, log a diagnostic
+            if candles_since_trade > 0 and candles_since_trade % 24 == 0:
+                idle_days = candles_since_trade / 24
+                log.warning(
+                    f"🔍 SELF-CHECK: No trades for {idle_days:.0f} day(s). "
+                    f"Macro={macro.regime} FG={macro.fear_greed} Funding={macro.funding_rate_pct:+.1f}%"
+                )
+                _tg(
+                    f"🔍 Self-check: no trades for {idle_days:.0f} day(s)\n"
+                    f"Macro: {macro.regime} | F&G: {macro.fear_greed} | Funding: {macro.funding_rate_pct:+.1f}%\n"
+                    f"Most common block: check journalctl for signal summaries"
+                )
+
+        # Heartbeat every 6 cycles (~6 min)
+        if cycle % 6 == 0:
             log.info(f"Heartbeat — cycle {cycle}, kill_switch={risk.kill_switch_active}")
 
         time.sleep(POLL_SEC)
