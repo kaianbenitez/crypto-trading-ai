@@ -1,6 +1,6 @@
 # Crypto Trading AI - Claude Code Handoff
 
-Read this first when resuming the project. This file is the current source of truth as of 2026-07-02.
+Read this first when resuming the project. This file is the current source of truth as of 2026-07-03.
 
 ## Current Production/Testnet Status
 
@@ -12,12 +12,13 @@ The bot is deployed and running on the user's IONOS Germany VPS.
 - Backend API: FastAPI behind Nginx at `/api/*`, locally on `127.0.0.1:8000`
 - Dashboard app: Next.js behind Nginx at `/`, locally on `127.0.0.1:3000`
 - Trading agent: systemd service `trading-agent`
+- Telegram bot/reports: systemd service `telegram-bot`
 - Exchange: Binance USD-M Futures testnet
-- Active trading symbols: `ETH/USDT`, `XRP/USDT` only
+- Active trading symbols: `BTC/USDT`, `ETH/USDT`, `XRP/USDT`, `SOL/USDT`, `ADA/USDT`, `BNB/USDT`, `DOGE/USDT`, `AVAX/USDT`, `LINK/USDT`, `DOT/USDT`, `POL/USDT`, `LTC/USDT`, `UNI/USDT`, `ATOM/USDT`, `FIL/USDT`
 - Current mode: paper/testnet trading, not live money
-- Testnet private API verified: balance read returned `5000.0 USDT`; open positions returned `0`
+- Testnet private API verified. Open exposure can exist on testnet; compare Binance positions with DB state before assuming flat exposure.
 - Dashboard login was tested successfully
-- API `/api/summary` was tested after login and returned zero trades, zero open positions, bankroll `1000.0`
+- API `/api/summary` was tested after login and returns bankroll/ROI/PnL/open-position state from the local SQLite DB.
 
 Important: Do not write API keys, API secrets, VPS password, or dashboard plaintext password into this file. Runtime secrets are stored only on the VPS in `/root/trading-ai/.env`.
 
@@ -31,11 +32,13 @@ No LLM is allowed in the live trading or execution loop.
 
 - Capital baseline: `BANKROLL_USDT=1000`
 - Current exchange: Binance Futures testnet
-- Current symbols: `ETH/USDT`, `XRP/USDT`
-- Do not trade `SOL/USDT`, `ADA/USDT`, or `BTC/USDT` until they show consistent positive ROI in forward/paper results
+- Current symbols: 15-symbol testnet roster listed above
 - Timeframe: 1h primary
 - Risk defaults:
   - `MAX_RISK_PER_TRADE_PCT=1.5`
+  - Treat `1.5%` as the ceiling, not a guaranteed fixed size.
+  - Actual risk can be reduced by macro regime sizing and per-coin brain sizing.
+  - Example: `BANKROLL_USDT=1000`, `MAX_RISK_PER_TRADE_PCT=1.5`, macro size `0.70` means effective trade risk is `10.50 USDT` / `1.05%`.
   - `MAX_DAILY_DRAWDOWN_PCT=5`
   - `MAX_CONCURRENT_POSITIONS=1`
   - `DEFAULT_LEVERAGE=3`
@@ -50,7 +53,9 @@ Use these commands over SSH as root:
 
 ```bash
 systemctl status nginx dashboard webapi trading-agent --no-pager
+systemctl status telegram-bot --no-pager
 journalctl -u trading-agent -f
+journalctl -u telegram-bot -n 100 --no-pager
 journalctl -u webapi -n 100 --no-pager
 journalctl -u dashboard -n 100 --no-pager
 journalctl -u nginx -n 100 --no-pager
@@ -63,6 +68,7 @@ nginx: active
 dashboard: active
 webapi: active
 trading-agent: active
+telegram-bot: active
 ```
 
 Service files:
@@ -70,6 +76,7 @@ Service files:
 ```text
 /etc/systemd/system/trading-agent.service
 /etc/systemd/system/webapi.service
+/etc/systemd/system/telegram-bot.service
 /etc/systemd/system/dashboard.service
 /usr/lib/systemd/system/nginx.service
 ```
@@ -118,6 +125,9 @@ DEFAULT_LEVERAGE=3
 MAX_LEVERAGE=5
 WEBAPI_PASSWORD_HASH=<stored on VPS only>
 WEBAPI_SECRET_KEY=<stored on VPS only>
+TELEGRAM_BOT_TOKEN=<stored on VPS only>
+TELEGRAM_CHAT_ID=<stored on VPS only>
+TELEGRAM_ALLOWED_USER_IDS=<optional, stored on VPS only>
 ```
 
 Do not overwrite `.env` casually. If credentials need rotation, edit it manually and restart services:
@@ -139,11 +149,11 @@ These changes exist in the local project folder and were also copied to the VPS.
    - Verified private testnet calls work: balance and positions.
 
 2. `agent/orchestrator.py`
-   - Restricted live symbol list to:
-
-```python
-SYMBOLS = ["ETH/USDT", "XRP/USDT"]
-```
+   - Uses the 15-symbol candidate roster from `agent.adapt.roster.CANDIDATE_SYMBOLS`.
+   - Recovers open DB trades on startup.
+   - Recovers Binance Futures conditional/algo SL/TP order IDs on startup.
+   - Normalizes Binance futures symbols such as `ADA/USDT:USDT` before comparing open positions.
+   - Applies per-coin brain and macro size adjustments before risk sizing.
 
 3. `agent/config/settings.py`
    - Default exchange changed from `bybit` to `binance`.
@@ -162,12 +172,16 @@ SYMBOLS = ["ETH/USDT", "XRP/USDT"]
 6. `deploy/dashboard.service`
    - Added systemd service for Next.js production server on port 3000.
 
+6a. `deploy/telegram-bot.service`
+   - Added systemd service for Telegram scheduled reports and two-way commands.
+
 7. `web/lib/api.ts`
    - Browser API URL now resolves from current host instead of hardcoded `localhost:8000`.
    - This matters because visitors' browsers cannot call VPS `localhost`.
 
 8. `webapi/main.py`
    - CORS loosened to allow dashboard access from VPS/public origin.
+   - Added richer open-position, candle, coin-brain, and adaptive activity endpoints.
 
 9. Nginx installed directly on VPS
    - Added reverse proxy so public dashboard works at `http://31.70.111.85` without exposing `:3000` or `:8000`.
@@ -226,16 +240,21 @@ Every 1h candle close, per symbol:
 
 6. Risk engine
    - Position sizing from bankroll and risk percent.
+   - `MAX_RISK_PER_TRADE_PCT=1.5` is the current ceiling.
+   - Effective risk may be lower after macro and per-coin adjustments.
+   - Formula: `risk_amount = BANKROLL_USDT * effective_risk_pct / 100`; `qty = risk_amount / abs(entry - stop_loss)`.
    - SL = ATR x 1.5.
    - TP = ATR x 3.0.
    - Daily drawdown kill-switch.
-   - Exchange-side stop-loss/take-profit orders after entry.
+   - Exchange-side reduce-only stop-loss/take-profit orders after entry.
+   - Binance Futures conditional/algo orders must be checked via `fapiPrivateGetOpenAlgoOrders`, not only normal open-order endpoints.
 
 7. Post-trade
    - Trade logged to SQLite.
    - Post-mortem generated.
    - Numeric params may be tuned within bounds.
-   - Telegram alerts optional if env vars are configured.
+   - Per-coin brain can adjust size/SL/TP/trailing within bounds after enough data.
+   - Telegram alerts and scheduled reports are enabled when env vars are configured.
 
 ## Backtest Notes
 
@@ -246,13 +265,7 @@ Backtest summary from 2026-07-01, 180d, 1h, walk-forward out-of-sample:
 | XRP/USDT | 44.3 | +2.85 | 3.00 | 17 |
 | ETH/USDT | 35.0 | +0.70 | 4.06 | 17 |
 
-Do not trade these yet:
-
-```text
-SOL/USDT
-ADA/USDT
-BTC/USDT
-```
+Those backtests are historical context only. The running paper/testnet bot now scans the full 15-symbol roster to gather forward data across majors and liquid alts.
 
 Earlier ETH grid-optimized result:
 
@@ -265,6 +278,7 @@ Expected paper performance if historical edge holds:
 ```text
 3-6 trades/week combined
 about $15 risk per trade at $1,000 bankroll
+actual risk may be lower, e.g. $10.50 when macro size multiplier is 0.70
 about 4-6% monthly ROI target, not guaranteed
 ```
 
@@ -348,7 +362,8 @@ Note: `/api/summary` should return `401 Unauthorized` unless authenticated.
 
 - Do not go live before the full 30-day paper trading review.
 - Do not switch `BINANCE_TESTNET=false` without explicit user approval.
-- Do not trade SOL/ADA/BTC yet.
+- Do not treat `1.5%` as mandatory risk; it is the ceiling.
+- Keep macro/per-coin risk reducers active.
 - Do not add an LLM to signal generation, risk, or execution.
 - Do not let adaptation modify code or strategy logic.
 - Do not commit secrets.
@@ -360,8 +375,8 @@ Note: `/api/summary` should return `401 Unauthorized` unless authenticated.
 
 1. Run `git status` locally and review all uncommitted deployment changes.
 2. Commit and push the VPS deployment fixes to GitHub.
-3. Confirm `agent/exchange/binance_futures.py` uses the direct Binance Futures testnet URL patch.
-4. Confirm `agent/orchestrator.py` trades only `ETH/USDT` and `XRP/USDT`.
+3. Confirm `agent/exchange/binance_futures.py` uses the direct Binance Futures testnet URL patch and Binance algo-order handling.
+4. Confirm `agent/orchestrator.py` uses the intended 15-symbol testnet roster.
 5. Monitor the first 24 hours of paper trading logs:
 
 ```bash
@@ -370,5 +385,5 @@ journalctl -u trading-agent -f
 ```
 
 6. Watch dashboard at `http://31.70.111.85`.
-7. Set up Telegram alerts if the user wants mobile notifications.
+7. Verify Telegram `/status`, `/positions`, and scheduled reports.
 8. After 30 days, review closed trades, win rate, ROI, drawdown, and post-mortems before any live-trading discussion.
