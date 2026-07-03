@@ -545,6 +545,29 @@ def run():
         risk.mark_position_opened(trade.symbol)
         log.info(f"[{trade.symbol}] Recovered open DB trade id={trade.id} on startup")
 
+    # Safety net: the DB is not the source of truth for what's actually live on
+    # the exchange (e.g. it can be wiped/rolled back). Cross-check against real
+    # exchange positions so we never open a second position on top of one the
+    # DB doesn't know about.
+    try:
+        live_positions = adapter.get_open_positions()
+    except Exception as e:
+        live_positions = []
+        log.warning(f"Startup exchange position check failed: {e}")
+    db_open_symbols = {t.symbol for t in open_trades}
+    for pos in live_positions:
+        sym = pos.get("symbol", "").replace(":USDT", "")
+        if not sym.endswith("/USDT") and "/" not in sym:
+            sym = sym.replace("USDT", "/USDT")
+        if sym in db_open_symbols:
+            continue
+        if sym not in states:
+            states[sym] = SymbolState(sym)
+        states[sym].open_trade_id = -1  # sentinel: exchange has a position, DB doesn't — block entries
+        risk.mark_position_opened(sym)
+        log.error(f"[{sym}] Exchange position with NO matching DB record — blocking new entries until reconciled")
+        _tg(f"🚨 {sym} has an open exchange position with no DB record (likely DB reset). Blocking new entries on it — reconcile manually.")
+
     cycle = 0
     macro = assess_macro(adapter)
     candles_since_trade = 0
@@ -590,6 +613,10 @@ def run():
                         risk.kill_switch_active = True
                 except Exception:
                     pass
+
+                # --- Unreconciled exchange position (no DB record) — hold, don't touch ---
+                if state.open_trade_id == -1:
+                    continue
 
                 # --- Monitor open position ---
                 if state.open_trade_id is not None:
