@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createChart, CandlestickSeries, LineSeries, ColorType } from "lightweight-charts";
 import { AgentStatus, api, CandlePayload, OpenPositionDetail, Summary, Trade } from "@/lib/api";
 
 // ── formatters ─────────────────────────────────────────────────────────────
@@ -113,15 +112,15 @@ function StatCard({
 }
 
 // ── PnlBar: visual range bar for entry/SL/TP ────────────────────────────────
-function PnlBar({ trade }: { trade: Trade }) {
+function PnlBar({ trade, currentPrice, tall = false }: { trade: Pick<Trade, "entry_price" | "stop_loss" | "take_profit" | "side">; currentPrice?: number; tall?: boolean }) {
   const { entry_price, stop_loss, take_profit, side } = trade;
-  const lo = Math.min(entry_price, stop_loss, take_profit);
-  const hi = Math.max(entry_price, stop_loss, take_profit);
+  const lo = Math.min(entry_price, stop_loss, take_profit, currentPrice ?? entry_price);
+  const hi = Math.max(entry_price, stop_loss, take_profit, currentPrice ?? entry_price);
   const span = hi - lo || 1;
   const pos  = (v: number) => `${((v - lo) / span) * 100}%`;
 
   return (
-    <div style={{ position: "relative", height: 6, background: "var(--surface3)", borderRadius: 3, margin: "12px 0 4px" }}>
+    <div style={{ position: "relative", height: tall ? 12 : 6, background: "var(--surface3)", borderRadius: 4, margin: tall ? "18px 0 20px" : "12px 0 4px" }}>
       {/* SL zone */}
       {side === "long" ? (
         <div style={{ position: "absolute", left: pos(stop_loss), right: `${100 - parseFloat(pos(entry_price))}%`, height: "100%", background: "var(--red)", opacity: 0.35, borderRadius: 3 }} />
@@ -142,103 +141,26 @@ function PnlBar({ trade }: { trade: Trade }) {
       ].map(({ price: p, color: c, label }) => (
         <div key={label} style={{ position: "absolute", left: pos(p), transform: "translateX(-50%)", top: -3, width: 12, height: 12, borderRadius: "50%", background: c, border: "2px solid var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }} title={`${label}: ${price4.format(p)}`} />
       ))}
+      {currentPrice !== undefined && (
+        <div
+          style={{ position: "absolute", left: pos(currentPrice), transform: "translateX(-50%)", top: tall ? -7 : -5, width: tall ? 2 : 10, height: tall ? 26 : 16, borderRadius: 2, background: "var(--text)", boxShadow: "0 0 0 2px var(--surface)", zIndex: 3 }}
+          title={`Current: ${price4.format(currentPrice)}`}
+        />
+      )}
     </div>
   );
 }
 
 // ── open position card ───────────────────────────────────────────────────────
-function PositionChart({ payload, side }: { payload?: CandlePayload; side: string }) {
-  const ref = useRef<HTMLDivElement>(null);
+function latestClose(payload?: CandlePayload) {
+  const last = payload?.candles?.[payload.candles.length - 1];
+  return last?.close;
+}
 
-  useEffect(() => {
-    if (!ref.current || !payload?.candles?.length) return;
-
-    const el = ref.current;
-    const chart = createChart(el, {
-      width: el.clientWidth,
-      height: 260,
-      layout: {
-        background: { type: ColorType.Solid, color: "transparent" },
-        textColor: "#6b7280",
-      },
-      grid: {
-        vertLines: { color: "rgba(255,255,255,0.04)" },
-        horzLines: { color: "rgba(255,255,255,0.05)" },
-      },
-      rightPriceScale: {
-        borderColor: "rgba(255,255,255,0.08)",
-        scaleMargins: { top: 0.12, bottom: 0.16 },
-      },
-      timeScale: {
-        borderColor: "rgba(255,255,255,0.08)",
-        timeVisible: true,
-        secondsVisible: false,
-      },
-    });
-
-    const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e",
-      downColor: "#ef4444",
-      borderUpColor: "#22c55e",
-      borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e",
-      wickDownColor: "#ef4444",
-    });
-
-    candleSeries.setData(payload.candles.map(c => ({
-      time: c.time as never,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    })));
-
-    if (payload.overlays.entry) {
-      candleSeries.createPriceLine({ price: payload.overlays.entry, color: "#60a5fa", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "Entry" });
-    }
-    if (payload.overlays.stop_loss) {
-      candleSeries.createPriceLine({ price: payload.overlays.stop_loss, color: "#ef4444", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "SL" });
-    }
-    if (payload.overlays.take_profit) {
-      candleSeries.createPriceLine({ price: payload.overlays.take_profit, color: "#22c55e", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "TP" });
-    }
-
-    const trail = payload.overlays.trail || [];
-    if (trail.length > 0) {
-      const trailSeries = chart.addSeries(LineSeries, {
-        color: "#f87171",
-        lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: false,
-      });
-      trailSeries.setData(trail.map(t => ({
-        time: Math.floor(new Date(t.time).getTime() / 1000) as never,
-        value: t.price,
-      })));
-    }
-
-    chart.timeScale().fitContent();
-
-    const resize = new ResizeObserver(() => {
-      chart.applyOptions({ width: el.clientWidth });
-    });
-    resize.observe(el);
-
-    return () => {
-      resize.disconnect();
-      chart.remove();
-    };
-  }, [payload, side]);
-
-  if (!payload?.candles?.length) {
-    return (
-      <div style={{ height: 260, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 12, background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8 }}>
-        Chart loading
-      </div>
-    );
-  }
-
-  return <div ref={ref} style={{ width: "100%", height: 260, background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8 }} />;
+function unrealizedPnl(trade: Pick<Trade, "side" | "entry_price" | "qty">, currentPrice?: number) {
+  if (currentPrice === undefined) return undefined;
+  const direction = trade.side === "long" ? 1 : -1;
+  return (currentPrice - trade.entry_price) * direction * trade.qty;
 }
 
 function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail; payload?: CandlePayload }) {
@@ -246,7 +168,12 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   const snap = trade.indicator_snapshot || {};
   const confidence = typeof snap.confidence === "number" ? snap.confidence : undefined;
+  const mtfEv = typeof snap.mtf_ev === "number" ? snap.mtf_ev : undefined;
   const trailMode = typeof snap.trail_mode === "string" ? snap.trail_mode : "trail";
+  const currentPrice = latestClose(payload);
+  const openPnl = unrealizedPnl(trade, currentPrice);
+  const initialRisk = Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
+  const openR = openPnl !== undefined && initialRisk > 0 ? openPnl / initialRisk : undefined;
 
   return (
     <div style={{ background: "var(--surface)", border: `1px solid ${sideColor}24`, borderRadius: 10, overflow: "hidden" }}>
@@ -261,33 +188,53 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {confidence !== undefined && <Badge color="var(--accent)">Conf {confidence.toFixed(2)}</Badge>}
+          {mtfEv !== undefined && <Badge color={mtfEv >= 1 ? "var(--green)" : "var(--amber)"}>EV {mtfEv.toFixed(2)}R</Badge>}
           <Badge color="var(--amber)">{trailMode}</Badge>
         </div>
       </div>
 
-      <div className="position-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(280px, 0.85fr)", gap: 12, padding: 12 }}>
-        <PositionChart payload={payload} side={trade.side} />
+      <div className="position-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 340px", gap: 12, padding: 12 }}>
+        <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Unrealized P&L</div>
+              <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: 28, fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+                {openPnl === undefined ? "Loading" : `${openPnl >= 0 ? "+" : ""}$${money.format(openPnl)}`}
+              </div>
+              {openR !== undefined && (
+                <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 5 }}>{openR >= 0 ? "+" : ""}{openR.toFixed(2)}R</div>
+              )}
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Current</div>
+              <div style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{currentPrice === undefined ? "..." : price4.format(currentPrice)}</div>
+            </div>
+          </div>
+
+          <PnlBar trade={trade} currentPrice={currentPrice} tall />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {[
+              ["SL", price4.format(trade.stop_loss), "var(--red)"],
+              ["Entry", price4.format(trade.entry_price), "var(--accent)"],
+              ["TP", price4.format(trade.take_profit), "var(--green)"],
+            ].map(([label, value, color]) => (
+              <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "9px 10px" }}>
+                <div style={{ color: color as string, fontSize: 11, fontWeight: 700 }}>{label}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{value}</div>
+              </div>
+            ))}
+          </div>
+
+        </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {[
-            ["THESIS", detail.reasoning.thesis],
-            ["NOW", detail.reasoning.now],
-            ["NEXT", detail.reasoning.next],
-          ].map(([label, lines]) => (
-            <div key={label as string} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
-              <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, marginBottom: 6 }}>{label as string}</div>
-              {(lines as string[]).slice(0, 3).map((line, idx) => (
-                <div key={idx} style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.45, marginTop: idx ? 4 : 0 }}>{line}</div>
-              ))}
-            </div>
-          ))}
-
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {[
-              ["Entry", price4.format(trade.entry_price)],
-              ["SL", price4.format(trade.stop_loss)],
-              ["TP", price4.format(trade.take_profit)],
+              ["Confidence", confidence !== undefined ? confidence.toFixed(2) : "..."],
+              ["EV", mtfEv !== undefined ? `${mtfEv.toFixed(2)}R` : "..."],
               ["Qty", price4.format(trade.qty)],
+              ["Opened", new Date(trade.opened_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })],
             ].map(([label, value]) => (
               <div key={label} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
                 <div style={{ color: "var(--muted)", fontSize: 10 }}>{label}</div>
@@ -295,6 +242,19 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
               </div>
             ))}
           </div>
+
+          {[
+            ["Thesis", detail.reasoning.thesis],
+            ["Now", detail.reasoning.now],
+            ["Next", detail.reasoning.next],
+          ].map(([label, lines]) => (
+            <div key={label as string} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{label as string}</div>
+              {(lines as string[]).slice(0, label === "Thesis" ? 2 : 1).map((line, idx) => (
+                <div key={idx} style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.45, marginTop: idx ? 4 : 0 }}>{line}</div>
+              ))}
+            </div>
+          ))}
         </div>
       </div>
     </div>
