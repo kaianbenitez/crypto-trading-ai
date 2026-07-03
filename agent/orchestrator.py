@@ -293,14 +293,39 @@ def _check_close(adapter, session, risk, state) -> bool:
     if not trade:
         return True
 
+    live_qty: float | None = None
     try:
         open_positions = adapter.get_open_positions()
-        open_syms = {_normalize_position_symbol(p.get("symbol")) for p in open_positions}
         clean_sym = _normalize_position_symbol(state.symbol)
-        still_open = clean_sym in open_syms
+        matched_pos = None
+        for p in open_positions:
+            if _normalize_position_symbol(p.get("symbol")) == clean_sym:
+                matched_pos = p
+                break
+        still_open = matched_pos is not None
+        if matched_pos:
+            raw = matched_pos.get("contracts") or matched_pos.get("contractSize")
+            if raw is not None:
+                live_qty = abs(float(raw))
     except Exception as e:
         log.warning(f"[{state.symbol}] get_open_positions failed: {e}")
         still_open = True
+
+    # Partial-fill reconciliation: TP order filled only part of the position.
+    # Update DB qty so force-close uses the right size and dashboard shows correct numbers.
+    if still_open and live_qty is not None and live_qty > 0 and trade.qty > 0:
+        if live_qty < trade.qty * 0.99:  # >1% discrepancy = partial fill
+            log.info(
+                f"[{state.symbol}] Partial fill: DB qty={trade.qty:.4f} → "
+                f"exchange qty={live_qty:.4f} ({(1 - live_qty / trade.qty) * 100:.1f}% closed by exchange)"
+            )
+            trade.qty = live_qty
+            session.commit()
+            _tg(
+                f"🔄 {state.symbol} partial TP fill detected\n"
+                f"Remaining: {live_qty:.4f} (was {trade.qty:.4f})\n"
+                f"DB qty updated — continuing to monitor remainder"
+            )
 
     if still_open:
         try:
@@ -375,7 +400,8 @@ def _check_close(adapter, session, risk, state) -> bool:
                 _tg(f"⏰ {state.symbol} force-closed after {hours_open:.0f}h")
                 try:
                     close_side = "sell" if trade.side == "long" else "buy"
-                    adapter.place_market_order(state.symbol, close_side, trade.qty)
+                    close_qty = live_qty if (live_qty is not None and live_qty > 0) else trade.qty
+                    adapter.place_market_order(state.symbol, close_side, close_qty)
                     for oid in [state.sl_order_id, state.tp_order_id]:
                         if oid:
                             try:
