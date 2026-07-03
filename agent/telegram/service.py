@@ -91,11 +91,11 @@ class TelegramService:
             return None
         pending = self.pending.get(user_id)
         if not pending:
-            return "No pending action."
+            return "🤷 No pending action."
         action, expires = pending
         if datetime.now(MANILA) > expires:
             self.pending.pop(user_id, None)
-            return "Confirmation expired."
+            return "⌛ Confirmation expired."
         self.pending.pop(user_id, None)
         return self._execute_destructive(session, user_id, action)
 
@@ -109,15 +109,15 @@ class TelegramService:
             state.kill_switch_reason = "telegram pause"
             session.commit()
             _audit(session, user_id, cmd, scope, "executed")
-            return "Paused: kill switch is ON. New entries are blocked."
+            return "⏸️ Paused: kill switch is ON. New entries are blocked."
         if cmd == "/resume" and scope == "all":
             state.kill_switch_active = False
             state.kill_switch_reason = "telegram resume"
             session.commit()
             _audit(session, user_id, cmd, scope, "executed")
-            return "Resumed: kill switch is OFF. New entries allowed."
+            return "▶️ Resumed: kill switch is OFF. New entries allowed."
         _audit(session, user_id, cmd, scope, "unsupported")
-        return "That destructive command is not wired yet. Supported: /pause all, /resume all."
+        return "🚧 That destructive command is not wired yet. Supported: /pause all, /resume all."
 
     def _handle_command(self, session, user_id: str, text: str) -> str:
         confirmed = self._handle_confirm(session, user_id, text)
@@ -133,7 +133,7 @@ class TelegramService:
             action = f"{cmd} {args[0] if args else 'all'}"
             self.pending[user_id] = (action, datetime.now(MANILA) + timedelta(seconds=30))
             _audit(session, user_id, cmd, arg_text, "pending_confirmation")
-            return f"Confirm {action} within 30 seconds by replying: confirm"
+            return f"⚠️ Confirm {action} within 30 seconds by replying: confirm"
         if cmd == "/status":
             _audit(session, user_id, cmd, arg_text, "ok")
             return status_report(session)
@@ -155,17 +155,17 @@ class TelegramService:
             return weekly_report(session) if report_type == "weekly" else eod_recap(session)
         if cmd == "/help":
             return (
-                "Commands\n"
-                "/status\n"
-                "/positions\n"
-                "/pnl today|week|month|all\n"
-                "/coin BTC\n"
-                "/report daily|weekly\n"
-                "/pause all\n"
-                "/resume all"
+                "📖 Commands\n"
+                "📊 /status\n"
+                "📍 /positions\n"
+                "💰 /pnl today|week|month|all\n"
+                "🪙 /coin BTC\n"
+                "📅 /report daily|weekly\n"
+                "⏸️ /pause all\n"
+                "▶️ /resume all"
             )
         _audit(session, user_id, cmd, arg_text, "unknown")
-        return "Unknown command. Try /help."
+        return "❓ Unknown command. Try /help."
 
     def poll_once(self, session) -> None:
         offset = int(_get_state(session, "last_update_id", "0") or "0")
@@ -184,7 +184,7 @@ class TelegramService:
                 self.send(self._handle_command(session, user_id, text))
             except Exception as exc:
                 log.exception("Command failed: %s", exc)
-                self.send(f"Command failed: {exc}")
+                self.send(f"⚠️ Command failed: {exc}")
 
     def scheduled_reports(self, session) -> None:
         now = datetime.now(MANILA)
@@ -214,7 +214,7 @@ class TelegramService:
                     log.info("Marked %d existing Telegram update(s) as seen", len(updates))
         finally:
             session.close()
-        self.send("Telegram bot online. Send /help for commands.")
+        self.send("🤖 Telegram bot online. Send /help for commands.")
         while True:
             session = get_session()
             try:
