@@ -120,7 +120,7 @@ function PnlBar({ trade, currentPrice, tall = false }: { trade: Pick<Trade, "ent
   const pos  = (v: number) => `${((v - lo) / span) * 100}%`;
 
   return (
-    <div style={{ position: "relative", height: tall ? 12 : 6, background: "var(--surface3)", borderRadius: 4, margin: tall ? "18px 0 20px" : "12px 0 4px" }}>
+    <div style={{ position: "relative", height: tall ? 10 : 6, background: "var(--surface3)", borderRadius: 4, margin: tall ? "12px 0 14px" : "12px 0 4px" }}>
       {/* SL zone */}
       {side === "long" ? (
         <div style={{ position: "absolute", left: pos(stop_loss), right: `${100 - parseFloat(pos(entry_price))}%`, height: "100%", background: "var(--red)", opacity: 0.35, borderRadius: 3 }} />
@@ -143,7 +143,7 @@ function PnlBar({ trade, currentPrice, tall = false }: { trade: Pick<Trade, "ent
       ))}
       {currentPrice !== undefined && (
         <div
-          style={{ position: "absolute", left: pos(currentPrice), transform: "translateX(-50%)", top: tall ? -7 : -5, width: tall ? 2 : 10, height: tall ? 26 : 16, borderRadius: 2, background: "var(--text)", boxShadow: "0 0 0 2px var(--surface)", zIndex: 3 }}
+          style={{ position: "absolute", left: pos(currentPrice), transform: "translateX(-50%)", top: tall ? -6 : -5, width: tall ? 2 : 10, height: tall ? 22 : 16, borderRadius: 2, background: "var(--text)", boxShadow: "0 0 0 2px var(--surface)", zIndex: 3 }}
           title={`Current: ${price4.format(currentPrice)}`}
         />
       )}
@@ -193,12 +193,12 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
         </div>
       </div>
 
-      <div className="position-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 340px", gap: 12, padding: 12 }}>
-        <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+      <div className="position-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 10, padding: 10, alignItems: "start" }}>
+        <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, alignSelf: "start" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
             <div>
               <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Unrealized P&L</div>
-              <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: 28, fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+              <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: 24, fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
                 {openPnl === undefined ? "Loading" : `${openPnl >= 0 ? "+" : ""}$${money.format(openPnl)}`}
               </div>
               {openR !== undefined && (
@@ -213,13 +213,13 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
 
           <PnlBar trade={trade} currentPrice={currentPrice} tall />
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
             {[
               ["SL", price4.format(trade.stop_loss), "var(--red)"],
               ["Entry", price4.format(trade.entry_price), "var(--accent)"],
               ["TP", price4.format(trade.take_profit), "var(--green)"],
             ].map(([label, value, color]) => (
-              <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "9px 10px" }}>
+              <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 9px" }}>
                 <div style={{ color: color as string, fontSize: 11, fontWeight: 700 }}>{label}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{value}</div>
               </div>
