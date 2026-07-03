@@ -163,6 +163,12 @@ function unrealizedPnl(trade: Pick<Trade, "side" | "entry_price" | "qty">, curre
   return (currentPrice - trade.entry_price) * direction * trade.qty;
 }
 
+function unrealizedPct(trade: Pick<Trade, "side" | "entry_price">, currentPrice?: number) {
+  if (currentPrice === undefined || !trade.entry_price) return undefined;
+  const direction = trade.side === "long" ? 1 : -1;
+  return ((currentPrice - trade.entry_price) / trade.entry_price) * direction * 100;
+}
+
 function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail; payload?: CandlePayload }) {
   const trade = detail.trade;
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
@@ -172,6 +178,7 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
   const trailMode = typeof snap.trail_mode === "string" ? snap.trail_mode : "trail";
   const currentPrice = latestClose(payload);
   const openPnl = unrealizedPnl(trade, currentPrice);
+  const openPct = unrealizedPct(trade, currentPrice);
   const initialRisk = Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
   const openR = openPnl !== undefined && initialRisk > 0 ? openPnl / initialRisk : undefined;
 
@@ -201,8 +208,11 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
               <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: 24, fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
                 {openPnl === undefined ? "Loading" : `${openPnl >= 0 ? "+" : ""}$${money.format(openPnl)}`}
               </div>
-              {openR !== undefined && (
-                <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 5 }}>{openR >= 0 ? "+" : ""}{openR.toFixed(2)}R</div>
+              {(openR !== undefined || openPct !== undefined) && (
+                <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 5, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {openPct !== undefined && <span style={{ color: pnlColor(openPct) }}>{openPct >= 0 ? "+" : ""}{openPct.toFixed(2)}%</span>}
+                  {openR !== undefined && <span>{openR >= 0 ? "+" : ""}{openR.toFixed(2)}R</span>}
+                </div>
               )}
             </div>
             <div style={{ textAlign: "right" }}>
