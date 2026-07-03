@@ -50,6 +50,14 @@ class SummaryOut(BaseModel):
     bankroll_usdt: float
 
 
+class LivePositionOut(BaseModel):
+    symbol: str
+    mark_price: float | None = None
+    unrealized_pnl: float | None = None
+    roi_pct: float | None = None
+    break_even_price: float | None = None
+
+
 class AgentStatusOut(BaseModel):
     trading_agent: str
     webapi: str

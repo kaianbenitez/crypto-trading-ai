@@ -106,6 +106,14 @@ export interface Summary {
   bankroll_usdt: number;
 }
 
+export interface LivePosition {
+  symbol: string;
+  mark_price: number | null;
+  unrealized_pnl: number | null;
+  roi_pct: number | null;
+  break_even_price: number | null;
+}
+
 export interface AgentStatus {
   trading_agent: string;
   webapi: string;
@@ -129,6 +137,7 @@ export const api = {
   trades: (limit = 100) => request<Trade[]>(`/api/trades?limit=${limit}`),
   trade: (id: number) => request<Trade>(`/api/trades/${id}`),
   openPositionDetails: () => request<OpenPositionDetail[]>("/api/open-positions-detail"),
+  livePositions: () => request<LivePosition[]>("/api/live-positions"),
   candles: (symbol: string, timeframe = "1h", limit = 120) =>
     request<CandlePayload>(`/api/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
   setKillSwitch: (active: boolean, reason?: string) =>

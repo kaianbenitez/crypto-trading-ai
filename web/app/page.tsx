@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentStatus, api, CandlePayload, OpenPositionDetail, Summary, Trade } from "@/lib/api";
+import { AgentStatus, api, CandlePayload, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
 
 // ── formatters ─────────────────────────────────────────────────────────────
 const money  = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -169,16 +169,19 @@ function unrealizedPct(trade: Pick<Trade, "side" | "entry_price">, currentPrice?
   return ((currentPrice - trade.entry_price) / trade.entry_price) * direction * 100;
 }
 
-function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail; payload?: CandlePayload }) {
+function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionDetail; payload?: CandlePayload; live?: LivePosition }) {
   const trade = detail.trade;
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   const snap = trade.indicator_snapshot || {};
   const confidence = typeof snap.confidence === "number" ? snap.confidence : undefined;
   const mtfEv = typeof snap.mtf_ev === "number" ? snap.mtf_ev : undefined;
   const trailMode = typeof snap.trail_mode === "string" ? snap.trail_mode : "trail";
-  const currentPrice = latestClose(payload);
-  const openPnl = unrealizedPnl(trade, currentPrice);
-  const openPct = unrealizedPct(trade, currentPrice);
+  // Prefer the exchange's own mark price / unrealized PnL / ROI — they account
+  // for trading fees and break-even price, unlike the (close - entry) * qty
+  // approximation from 1h candles, which was drifting a few dollars off.
+  const currentPrice = live?.mark_price ?? latestClose(payload);
+  const openPnl = live?.unrealized_pnl ?? unrealizedPnl(trade, currentPrice);
+  const openPct = live?.roi_pct ?? unrealizedPct(trade, currentPrice);
   const initialRisk = Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
   const openR = openPnl !== undefined && initialRisk > 0 ? openPnl / initialRisk : undefined;
 
@@ -439,6 +442,7 @@ function Dashboard() {
   const [trades,  setTrades]  = useState<Trade[]>([]);
   const [positionDetails, setPositionDetails] = useState<OpenPositionDetail[]>([]);
   const [candlePayloads, setCandlePayloads] = useState<Record<string, CandlePayload>>({});
+  const [livePositions, setLivePositions] = useState<Record<string, LivePosition>>({});
   const [loading, setLoading] = useState(true);
   const [toggling,      setToggling]      = useState(false);
   const [confirmingHalt,setConfirmingHalt]= useState(false);
@@ -448,13 +452,20 @@ function Dashboard() {
 
   async function load() {
     try {
-      const [s, st, t, details] = await Promise.all([
+      const [s, st, t, details, live] = await Promise.all([
         api.summary(),
         api.agentStatus(),
         api.trades(15),
         api.openPositionDetails(),
+        api.livePositions().catch(() => []),
       ]);
       setSummary(s); setStatus(st); setTrades(t); setPositionDetails(details); setError(null);
+      const liveBySymbol: Record<string, LivePosition> = {};
+      live.forEach(p => {
+        const norm = p.symbol.includes("/") ? p.symbol : p.symbol.replace(/USDT$/, "/USDT");
+        liveBySymbol[norm] = p;
+      });
+      setLivePositions(liveBySymbol);
       if (details.length > 0) {
         const candles = await Promise.all(
           details.map(d => api.candles(d.trade.symbol, "1h", 120).catch(() => null))
@@ -640,6 +651,7 @@ function Dashboard() {
                     key={d.trade.id}
                     detail={d}
                     payload={candlePayloads[d.trade.symbol]}
+                    live={livePositions[d.trade.symbol]}
                   />
                 ))}
               </div>

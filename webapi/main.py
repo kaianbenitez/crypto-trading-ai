@@ -14,7 +14,7 @@ from agent.dashboard.reasoning_engine import position_reasoning
 from webapi import app_state  # noqa: F401 (registers AgentState on the shared Base)
 from webapi.app_state import get_or_create_state
 from webapi.auth import verify_password, create_session_token, require_session, SESSION_COOKIE
-from webapi.schemas import LoginRequest, TradeOut, KillSwitchRequest, SummaryOut, AgentStatusOut
+from webapi.schemas import LoginRequest, TradeOut, KillSwitchRequest, SummaryOut, AgentStatusOut, LivePositionOut
 
 app = FastAPI(title="Crypto Trading AI")
 
@@ -197,6 +197,35 @@ def candles(symbol: str, timeframe: str = "1h", limit: int = 120, session=Depend
             .all()
         )
     return build_candlestick_payload(symbol, candle_rows, trade, trail_events)
+
+
+@app.get("/api/live-positions", response_model=list[LivePositionOut])
+def live_positions(_=Depends(require_session)):
+    """Real exchange-reported unrealized P&L — accounts for fees and true mark
+    price, unlike the frontend's (close - entry) * qty approximation."""
+    try:
+        adapter = BinanceFuturesAdapter()
+        positions = adapter.get_open_positions()
+    except Exception:
+        return []
+    out = []
+    for p in positions:
+        if float(p.get("contracts") or 0) == 0:
+            continue
+        mark = p.get("markPrice")
+        raw_info = p.get("info") or {}
+        break_even = raw_info.get("breakEvenPrice") or p.get("entryPrice")
+        roi_pct = None
+        if p.get("percentage") is not None:
+            roi_pct = float(p["percentage"])
+        out.append(LivePositionOut(
+            symbol=p.get("symbol", ""),
+            mark_price=float(mark) if mark is not None else None,
+            unrealized_pnl=float(p.get("unrealizedPnl")) if p.get("unrealizedPnl") is not None else None,
+            roi_pct=roi_pct,
+            break_even_price=float(break_even) if break_even is not None else None,
+        ))
+    return out
 
 
 @app.get("/api/coin-brains")
