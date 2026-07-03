@@ -41,12 +41,15 @@ from agent.adapt.memory import save_lesson, apply_memory
 from agent.adapt.weights import update_weights, apply_weights
 from agent.adapt.roster import CoinRoster, CANDIDATE_SYMBOLS
 from agent.fundamental.macro import assess_macro
+from agent.learning.per_coin_brain import PerCoinBrain
+from agent.risk.trailing_stop_manager import TrailingStopManager
+from agent.telegram import templates as tg_templates
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-SYMBOLS    = ["ETH/USDT", "XRP/USDT"]
+SYMBOLS    = CANDIDATE_SYMBOLS
 TIMEFRAME  = "1h"
 CANDLES    = 200
 POLL_SEC   = 60
@@ -77,7 +80,7 @@ def _tg(message: str) -> None:
         import requests
         requests.post(
             f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
-            json={"chat_id": settings.telegram_chat_id, "text": message},
+            json={"chat_id": settings.telegram_chat_id, "text": message, "parse_mode": "Markdown"},
             timeout=10,
         )
     except Exception as e:
@@ -97,6 +100,54 @@ def _candle_close_timestamp(tf: str) -> int:
     else:
         period_ms = 3_600_000
     return (now_ms // period_ms) * period_ms
+
+
+def _normalize_position_symbol(symbol: str | None) -> str:
+    """Normalize spot/futures symbol variants like ADA/USDT:USDT."""
+    if not symbol:
+        return ""
+    base = str(symbol).split(":", 1)[0]
+    return base.replace("/", "").replace("-", "").upper()
+
+
+def _same_price(a: float | None, b: float | None, tolerance: float = 0.002) -> bool:
+    if a is None or b is None:
+        return False
+    return abs(float(a) - float(b)) / max(abs(float(b)), 1e-9) <= tolerance
+
+
+def _recover_protective_order_ids(adapter, state, trade) -> None:
+    if not hasattr(adapter, "fetch_open_algo_orders"):
+        return
+    try:
+        orders = adapter.fetch_open_algo_orders(trade.symbol)
+    except Exception as e:
+        log.warning(f"[{trade.symbol}] Protective order recovery failed: {e}")
+        return
+
+    close_side = "SELL" if trade.side == "long" else "BUY"
+    for order in orders:
+        if str(order.get("side", "")).upper() != close_side:
+            continue
+        if str(order.get("algoStatus", "")).upper() != "NEW":
+            continue
+        if str(order.get("reduceOnly", "")).lower() not in {"true", "1"} and order.get("reduceOnly") is not True:
+            continue
+        order_type = str(order.get("orderType", "")).upper()
+        trigger = float(order.get("triggerPrice") or 0)
+        algo_id = str(order.get("algoId") or "")
+        if not algo_id:
+            continue
+        if order_type == "STOP_MARKET" and _same_price(trigger, trade.stop_loss):
+            state.sl_order_id = algo_id
+        elif order_type == "TAKE_PROFIT_MARKET" and _same_price(trigger, trade.take_profit):
+            state.tp_order_id = algo_id
+
+    if state.sl_order_id or state.tp_order_id:
+        log.info(
+            f"[{trade.symbol}] Recovered protective orders "
+            f"SL={state.sl_order_id or '-'} TP={state.tp_order_id or '-'}"
+        )
 
 
 def _fetch_df(adapter, symbol: str) -> pd.DataFrame:
@@ -136,7 +187,10 @@ class SymbolState:
 # ---------------------------------------------------------------------------
 
 def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
+    previous_risk_params = dict(risk.params)
+    risk.params = dict(params)
     plan = risk.plan_trade(state.symbol, signal.side, row["close"], row["atr"])
+    risk.params = previous_risk_params
 
     if not plan.approved:
         log.info(f"[{state.symbol}] Trade rejected by risk engine: {plan.reject_reason}")
@@ -186,6 +240,8 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
         take_profit=plan.take_profit,
         leverage=plan.leverage,
     )
+    signal.indicator_snapshot["confidence"] = round(signal.confidence, 3)
+    signal.indicator_snapshot["trail_mode"] = TrailingStopManager.mode_for(signal.strategy_name, trade.regime)
     trade.set_entry_reasoning(signal.reasoning)
     trade.set_indicator_snapshot(signal.indicator_snapshot)
     trade.set_params_snapshot(params)
@@ -201,6 +257,18 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
         f"Qty: {plan.qty:.4f} | Leverage: {plan.leverage}x\n"
         f"Reason: {signal.reasoning[0] if signal.reasoning else '-'}"
     )
+    msg = tg_templates.opened(
+        symbol=state.symbol,
+        side=signal.side.value,
+        entry=fill_price,
+        stop=plan.stop_loss,
+        take_profit=plan.take_profit,
+        qty=plan.qty,
+        leg=signal.strategy_name,
+        regime=trade.regime,
+        confidence=signal.confidence,
+        thesis=signal.reasoning,
+    )
     log.info(f"[{state.symbol}] " + msg.replace("\n", " | "))
     _tg(msg)
     return True
@@ -213,15 +281,49 @@ def _check_close(adapter, session, risk, state) -> bool:
 
     try:
         open_positions = adapter.get_open_positions()
-        open_syms = {p["symbol"].replace("/", "") for p in open_positions}
-        clean_sym = state.symbol.replace("/", "")
+        open_syms = {_normalize_position_symbol(p.get("symbol")) for p in open_positions}
+        clean_sym = _normalize_position_symbol(state.symbol)
         still_open = clean_sym in open_syms
     except Exception as e:
         log.warning(f"[{state.symbol}] get_open_positions failed: {e}")
         still_open = True
 
     if still_open:
-        if not state.be_armed:
+        try:
+            candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=80)
+            trail_df = pd.DataFrame([{
+                "open": c.open, "high": c.high, "low": c.low,
+                "close": c.close, "volume": c.volume, "timestamp": c.timestamp,
+            } for c in candles])
+            if len(trail_df) >= 30:
+                trail_df = add_indicators(
+                    trail_df.sort_values("timestamp").reset_index(drop=True),
+                    state.params,
+                ).dropna()
+                trail = TrailingStopManager(adapter, session, _tg).maybe_update(
+                    trade=trade,
+                    state=state,
+                    df=trail_df,
+                    params=state.params,
+                )
+                if trail.moved:
+                    state.be_armed = True
+                    log.info(
+                        f"[{state.symbol}] Trail moved {trail.old_stop:.4f} -> {trail.new_stop:.4f} "
+                        f"mode={trail.mode} reason={trail.reason}"
+                    )
+                    if trail.is_major:
+                        _tg(tg_templates.trail(
+                            state.symbol,
+                            trail.old_stop,
+                            trail.new_stop,
+                            trail.mode or "trail",
+                            trail.reason or "trail update",
+                        ))
+        except Exception as e:
+            log.warning(f"[{state.symbol}] trailing stop check failed: {e}")
+
+        if False and not state.be_armed:
             try:
                 candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=1)
                 current_price = candles[-1].close if candles else None
@@ -250,7 +352,10 @@ def _check_close(adapter, session, risk, state) -> bool:
                 log.warning(f"[{state.symbol}] BE check failed: {e}")
 
         if trade.opened_at:
-            hours_open = (datetime.now(timezone.utc) - trade.opened_at).total_seconds() / 3600
+            opened_at = trade.opened_at
+            if opened_at.tzinfo is None:
+                opened_at = opened_at.replace(tzinfo=timezone.utc)
+            hours_open = (datetime.now(timezone.utc) - opened_at).total_seconds() / 3600
             if hours_open >= MAX_TRADE_HOURS:
                 log.info(f"[{state.symbol}] Force-closing after {hours_open:.1f}h (max {MAX_TRADE_HOURS}h)")
                 _tg(f"⏰ {state.symbol} force-closed after {hours_open:.0f}h")
@@ -271,11 +376,35 @@ def _check_close(adapter, session, risk, state) -> bool:
         if still_open:
             return False
 
+    exit_fill = None
     try:
-        candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=1)
-        exit_price = candles[-1].close if candles else trade.entry_price
-    except Exception:
-        exit_price = trade.entry_price
+        if hasattr(adapter, "get_exit_fill"):
+            exit_fill = adapter.get_exit_fill(
+                state.symbol,
+                trade.side,
+                trade.opened_at,
+                trade.qty,
+            )
+    except Exception as e:
+        log.warning(f"[{state.symbol}] Could not fetch exchange exit fill: {e}")
+
+    if exit_fill:
+        exit_price = float(exit_fill["price"])
+        log.info(
+            f"[{state.symbol}] Exit fill resolved from exchange trades: "
+            f"price={exit_price:.4f} qty={float(exit_fill.get('qty') or 0):.4f}"
+        )
+    else:
+        try:
+            candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=1)
+            exit_price = candles[-1].close if candles else trade.entry_price
+            log.warning(
+                f"[{state.symbol}] Exit fill unavailable; using latest 1m close "
+                f"{exit_price:.4f} as fallback"
+            )
+        except Exception:
+            exit_price = trade.entry_price
+            log.warning(f"[{state.symbol}] Exit fill and fallback candle unavailable; using entry price")
 
     direction  = 1 if trade.side == "long" else -1
     raw_pnl    = (exit_price - trade.entry_price) * direction * trade.qty
@@ -321,6 +450,19 @@ def _check_close(adapter, session, risk, state) -> bool:
         log.warning(f"[{state.symbol}] Weight update failed: {e}")
 
     try:
+        brain_update = PerCoinBrain(session, state.symbol).update_after_trade(trade)
+        if brain_update.changed:
+            log.info(f"[{state.symbol}] Per-coin brain updated: {brain_update.reason}")
+            _tg(tg_templates.brain_update(
+                state.symbol,
+                brain_update.version,
+                brain_update.reason,
+                brain_update.disabled_legs,
+            ))
+    except Exception as e:
+        log.warning(f"[{state.symbol}] Per-coin brain update failed: {e}")
+
+    try:
         from agent.adapt.roster import CoinRoster as _Roster
         _roster = _Roster(session)
         bench_msg = _roster.record_trade(state.symbol, outcome)
@@ -334,6 +476,15 @@ def _check_close(adapter, session, risk, state) -> bool:
         f"{emoji} {state.symbol} {trade.side.upper()} CLOSED\n"
         f"Exit: {exit_price:.4f} | PnL: {raw_pnl:+.2f} USDT | {outcome.upper()}\n"
         f"Reason: {exit_reason}"
+    )
+    msg = tg_templates.closed(
+        state.symbol,
+        trade.side,
+        exit_price,
+        raw_pnl,
+        outcome,
+        exit_reason,
+        postmortem,
     )
     log.info(f"[{state.symbol}] " + msg.replace("\n", " | "))
     _tg(msg)
@@ -376,6 +527,15 @@ def run():
     risk   = RiskEngine(exch_settings)
     roster = CoinRoster(session, adapter)
     states: dict[str, SymbolState] = {s: SymbolState(s) for s in roster.get_active()}
+
+    open_trades = session.query(Trade).filter(Trade.closed_at.is_(None)).all()
+    for trade in open_trades:
+        if trade.symbol not in states:
+            states[trade.symbol] = SymbolState(trade.symbol)
+        states[trade.symbol].open_trade_id = trade.id
+        _recover_protective_order_ids(adapter, states[trade.symbol], trade)
+        risk.mark_position_opened(trade.symbol)
+        log.info(f"[{trade.symbol}] Recovered open DB trade id={trade.id} on startup")
 
     cycle = 0
     macro = assess_macro(adapter)
@@ -458,6 +618,16 @@ def run():
                 # --- Generate signal ---
                 signal = generate_signal(row, prev, state.params)
 
+                try:
+                    disabled_legs = PerCoinBrain(session, symbol).disabled_legs()
+                    if signal.strategy_name in disabled_legs:
+                        log.info(f"[{symbol}] {signal.strategy_name} disabled by per-coin brain")
+                        signal_summary.append(f"{symbol}: {signal.strategy_name} disabled by per-coin brain")
+                        state.last_candle = now_candle
+                        continue
+                except Exception as e:
+                    log.warning(f"[{symbol}] Per-coin leg check failed (continuing): {e}")
+
                 if signal.is_actionable and signal.confidence > 0:
                     # --- MTF confluence gate ---
                     if USE_MTF:
@@ -522,8 +692,8 @@ def run():
                     except Exception as e:
                         log.warning(f"[{symbol}] Weight apply failed (continuing): {e}")
 
-                    # --- Macro size adjustment ---
-                    trade_params = dict(state.params)
+                    # --- Per-coin + macro size adjustment ---
+                    trade_params = PerCoinBrain(session, symbol).apply_to_trade_params(state.params)
                     if macro.size_multiplier < 1.0:
                         orig_risk = trade_params.get("max_risk_per_trade_pct", 1.5)
                         trade_params["max_risk_per_trade_pct"] = round(orig_risk * macro.size_multiplier, 3)

@@ -50,6 +50,53 @@ export interface Trade {
   closed_at: string | null;
 }
 
+export interface PositionReasoning {
+  thesis: string[];
+  now: string[];
+  next: string[];
+}
+
+export interface OpenPositionDetail {
+  trade: Pick<
+    Trade,
+    | "id"
+    | "symbol"
+    | "side"
+    | "strategy_name"
+    | "regime"
+    | "entry_price"
+    | "stop_loss"
+    | "take_profit"
+    | "qty"
+    | "opened_at"
+    | "indicator_snapshot"
+  >;
+  reasoning: PositionReasoning;
+}
+
+export interface CandlePoint {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface CandlePayload {
+  symbol: string;
+  candles: CandlePoint[];
+  overlays: {
+    entry?: number;
+    stop_loss?: number;
+    take_profit?: number;
+    side?: string;
+    regime?: string;
+    strategy?: string;
+    trail?: Array<{ time: string; price: number; mode: string }>;
+  };
+}
+
 export interface Summary {
   total_trades: number;
   win_rate_pct: number;
@@ -81,6 +128,9 @@ export const api = {
   agentStatus: () => request<AgentStatus>("/api/agent-status"),
   trades: (limit = 100) => request<Trade[]>(`/api/trades?limit=${limit}`),
   trade: (id: number) => request<Trade>(`/api/trades/${id}`),
+  openPositionDetails: () => request<OpenPositionDetail[]>("/api/open-positions-detail"),
+  candles: (symbol: string, timeframe = "1h", limit = 120) =>
+    request<CandlePayload>(`/api/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
   setKillSwitch: (active: boolean, reason?: string) =>
     request<{ ok: boolean; kill_switch_active: boolean }>("/api/kill-switch", {
       method: "POST",

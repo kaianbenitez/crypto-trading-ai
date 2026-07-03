@@ -22,6 +22,7 @@ class Settings:
 
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    telegram_allowed_user_ids: str = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")
 
     bankroll_usdt: float = float(os.getenv("BANKROLL_USDT", "1000"))
 

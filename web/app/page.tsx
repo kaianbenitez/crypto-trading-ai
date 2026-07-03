@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentStatus, api, Summary, Trade } from "@/lib/api";
+import { createChart, CandlestickSeries, LineSeries, ColorType } from "lightweight-charts";
+import { AgentStatus, api, CandlePayload, OpenPositionDetail, Summary, Trade } from "@/lib/api";
 
 // ── formatters ─────────────────────────────────────────────────────────────
 const money  = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -10,7 +11,8 @@ const pct    = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 
 // ── coin logo ───────────────────────────────────────────────────────────────
 function coinSlug(symbol: string) {
-  return symbol.replace("/USDT", "").replace("/USD", "").toLowerCase();
+  const base = symbol.replace("/USDT", "").replace("/USD", "").toLowerCase();
+  return base === "pol" ? "matic" : base;
 }
 function CoinLogo({ symbol, size = 28 }: { symbol: string; size?: number }) {
   const slug = coinSlug(symbol);
@@ -145,6 +147,160 @@ function PnlBar({ trade }: { trade: Trade }) {
 }
 
 // ── open position card ───────────────────────────────────────────────────────
+function PositionChart({ payload, side }: { payload?: CandlePayload; side: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!ref.current || !payload?.candles?.length) return;
+
+    const el = ref.current;
+    const chart = createChart(el, {
+      width: el.clientWidth,
+      height: 260,
+      layout: {
+        background: { type: ColorType.Solid, color: "transparent" },
+        textColor: "#6b7280",
+      },
+      grid: {
+        vertLines: { color: "rgba(255,255,255,0.04)" },
+        horzLines: { color: "rgba(255,255,255,0.05)" },
+      },
+      rightPriceScale: {
+        borderColor: "rgba(255,255,255,0.08)",
+        scaleMargins: { top: 0.12, bottom: 0.16 },
+      },
+      timeScale: {
+        borderColor: "rgba(255,255,255,0.08)",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
+
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderUpColor: "#22c55e",
+      borderDownColor: "#ef4444",
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+
+    candleSeries.setData(payload.candles.map(c => ({
+      time: c.time as never,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    })));
+
+    if (payload.overlays.entry) {
+      candleSeries.createPriceLine({ price: payload.overlays.entry, color: "#60a5fa", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "Entry" });
+    }
+    if (payload.overlays.stop_loss) {
+      candleSeries.createPriceLine({ price: payload.overlays.stop_loss, color: "#ef4444", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "SL" });
+    }
+    if (payload.overlays.take_profit) {
+      candleSeries.createPriceLine({ price: payload.overlays.take_profit, color: "#22c55e", lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "TP" });
+    }
+
+    const trail = payload.overlays.trail || [];
+    if (trail.length > 0) {
+      const trailSeries = chart.addSeries(LineSeries, {
+        color: "#f87171",
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      trailSeries.setData(trail.map(t => ({
+        time: Math.floor(new Date(t.time).getTime() / 1000) as never,
+        value: t.price,
+      })));
+    }
+
+    chart.timeScale().fitContent();
+
+    const resize = new ResizeObserver(() => {
+      chart.applyOptions({ width: el.clientWidth });
+    });
+    resize.observe(el);
+
+    return () => {
+      resize.disconnect();
+      chart.remove();
+    };
+  }, [payload, side]);
+
+  if (!payload?.candles?.length) {
+    return (
+      <div style={{ height: 260, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontSize: 12, background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8 }}>
+        Chart loading
+      </div>
+    );
+  }
+
+  return <div ref={ref} style={{ width: "100%", height: 260, background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8 }} />;
+}
+
+function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail; payload?: CandlePayload }) {
+  const trade = detail.trade;
+  const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
+  const snap = trade.indicator_snapshot || {};
+  const confidence = typeof snap.confidence === "number" ? snap.confidence : undefined;
+  const trailMode = typeof snap.trail_mode === "string" ? snap.trail_mode : "trail";
+
+  return (
+    <div style={{ background: "var(--surface)", border: `1px solid ${sideColor}24`, borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <CoinLogo symbol={trade.symbol} size={26} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{trade.symbol}</div>
+            <div style={{ color: "var(--muted)", fontSize: 11 }}>{trade.strategy_name} · {trade.regime}</div>
+          </div>
+          <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {confidence !== undefined && <Badge color="var(--accent)">Conf {confidence.toFixed(2)}</Badge>}
+          <Badge color="var(--amber)">{trailMode}</Badge>
+        </div>
+      </div>
+
+      <div className="position-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.45fr) minmax(280px, 0.85fr)", gap: 12, padding: 12 }}>
+        <PositionChart payload={payload} side={trade.side} />
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {[
+            ["THESIS", detail.reasoning.thesis],
+            ["NOW", detail.reasoning.now],
+            ["NEXT", detail.reasoning.next],
+          ].map(([label, lines]) => (
+            <div key={label as string} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
+              <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, marginBottom: 6 }}>{label as string}</div>
+              {(lines as string[]).slice(0, 3).map((line, idx) => (
+                <div key={idx} style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.45, marginTop: idx ? 4 : 0 }}>{line}</div>
+              ))}
+            </div>
+          ))}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {[
+              ["Entry", price4.format(trade.entry_price)],
+              ["SL", price4.format(trade.stop_loss)],
+              ["TP", price4.format(trade.take_profit)],
+              ["Qty", price4.format(trade.qty)],
+            ].map(([label, value]) => (
+              <div key={label} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
+                <div style={{ color: "var(--muted)", fontSize: 10 }}>{label}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OpenPosition({ trade }: { trade: Trade }) {
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   return (
@@ -248,7 +404,6 @@ function NavBar({ killActive, status }: { killActive?: boolean; status?: AgentSt
         {[
           { label: "Dashboard", href: "/" },
           { label: "Journal",   href: "/journal" },
-          { label: "Signals",   href: "/signals" },
         ].map(({ label, href }) => (
           <a key={href} href={href} style={{ color: "var(--muted)", fontSize: 13, textDecoration: "none", transition: "color 0.15s" }}
              onMouseEnter={e => (e.currentTarget.style.color = "var(--text)")}
@@ -318,6 +473,8 @@ function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [status,  setStatus]  = useState<AgentStatus | null>(null);
   const [trades,  setTrades]  = useState<Trade[]>([]);
+  const [positionDetails, setPositionDetails] = useState<OpenPositionDetail[]>([]);
+  const [candlePayloads, setCandlePayloads] = useState<Record<string, CandlePayload>>({});
   const [loading, setLoading] = useState(true);
   const [toggling,      setToggling]      = useState(false);
   const [confirmingHalt,setConfirmingHalt]= useState(false);
@@ -327,8 +484,25 @@ function Dashboard() {
 
   async function load() {
     try {
-      const [s, st, t] = await Promise.all([api.summary(), api.agentStatus(), api.trades(15)]);
-      setSummary(s); setStatus(st); setTrades(t); setError(null);
+      const [s, st, t, details] = await Promise.all([
+        api.summary(),
+        api.agentStatus(),
+        api.trades(15),
+        api.openPositionDetails(),
+      ]);
+      setSummary(s); setStatus(st); setTrades(t); setPositionDetails(details); setError(null);
+      if (details.length > 0) {
+        const candles = await Promise.all(
+          details.map(d => api.candles(d.trade.symbol, "1h", 120).catch(() => null))
+        );
+        const nextPayloads: Record<string, CandlePayload> = {};
+        candles.forEach((payload, idx) => {
+          if (payload) nextPayloads[details[idx].trade.symbol] = payload;
+        });
+        setCandlePayloads(nextPayloads);
+      } else {
+        setCandlePayloads({});
+      }
     } catch {
       setError("Cannot reach API — retrying every 15 s");
     } finally {
@@ -372,6 +546,7 @@ function Dashboard() {
   }, [status?.checked_at]);
 
   const openTrades   = trades.filter(t => !t.closed_at);
+  const openCount    = positionDetails.length || openTrades.length;
   const closedTrades = trades.filter(t =>  t.closed_at);
   const killActive   = summary?.kill_switch_active;
   const regime       = status?.macro_regime || "normal";
@@ -390,7 +565,7 @@ function Dashboard() {
         </div>
       )}
 
-      <main style={{ maxWidth: 1200, margin: "0 auto", padding: "28px 20px 60px" }}>
+      <main style={{ maxWidth: 1560, margin: "0 auto", padding: "28px 28px 60px" }}>
 
         {/* Header row */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
@@ -426,7 +601,7 @@ function Dashboard() {
         )}
 
         {/* Stat row */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10, marginBottom: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 18 }}>
           <StatCard label="Bankroll" value={summary ? `$${money.format(summary.bankroll_usdt)}` : "—"} sub="USDT balance" loading={loading} accent="var(--accent)" />
           <StatCard label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub="all-time" loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />
           <StatCard label="Realized P&L" value={closedTrades.length ? `${totalPnl >= 0 ? "+" : ""}$${money.format(totalPnl)}` : "—"} color={pnlColor(totalPnl)} sub={`${closedTrades.length} closed trades`} loading={loading} accent={pnlColor(totalPnl)} />
@@ -436,7 +611,7 @@ function Dashboard() {
         </div>
 
         {/* Middle row: services + symbols | open positions */}
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 320px) 1fr", gap: 12, marginBottom: 18 }}>
+        <div className="dashboard-main-grid" style={{ display: "grid", gridTemplateColumns: "340px minmax(0, 1fr)", gap: 14, marginBottom: 18 }}>
 
           {/* Left col: services + market */}
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -492,15 +667,42 @@ function Dashboard() {
           <div>
             <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
               <h2 style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Open Positions</h2>
-              {openTrades.length > 0 && <Badge color="var(--amber)">{openTrades.length}</Badge>}
+              {openCount > 0 && <Badge color="var(--amber)">{openCount}</Badge>}
             </div>
-            {openTrades.length > 0 ? (
+            {positionDetails.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {positionDetails.map(d => (
+                  <DetailedOpenPosition
+                    key={d.trade.id}
+                    detail={d}
+                    payload={candlePayloads[d.trade.symbol]}
+                  />
+                ))}
+              </div>
+            ) : openTrades.length > 0 ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {openTrades.map(t => <OpenPosition key={t.id} trade={t} />)}
               </div>
             ) : (
-              <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: "48px 24px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
-                {loading ? "Loading positions…" : "No active positions — scanning for setups"}
+              <div className="empty-position-grid" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, minHeight: 164, padding: 16, color: "var(--muted)", fontSize: 13, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, alignItems: "stretch" }}>
+                {loading ? (
+                  <div style={{ gridColumn: "1 / -1", alignSelf: "center", textAlign: "center" }}>Loading positions...</div>
+                ) : (
+                  <>
+                    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
+                      <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Scanning</div>
+                      <div>Active symbols are checked on each candle close.</div>
+                    </div>
+                    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
+                      <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>No Exposure</div>
+                      <div>No open testnet position is being managed right now.</div>
+                    </div>
+                    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
+                      <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Next Trade</div>
+                      <div>When a trade opens, chart and reasoning appear here.</div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>

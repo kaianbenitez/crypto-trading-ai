@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text
+from sqlalchemy import Boolean, create_engine, Column, Integer, String, Float, DateTime, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -93,6 +93,83 @@ class TradeMemory(Base):
     regime     = Column(String, nullable=True)
     outcome    = Column(String, nullable=True)       # win | loss | breakeven
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PerCoinBrainState(Base):
+    """Isolated adaptive state for one coin only."""
+    __tablename__ = "per_coin_brain_state"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, unique=True, index=True)
+    params = Column(Text, nullable=False)                 # JSON dict
+    leg_stats = Column(Text, nullable=False)              # JSON dict {leg: stats}
+    regime_stats = Column(Text, nullable=False)           # JSON dict {leg|regime: stats}
+    disabled_legs = Column(Text, nullable=False)          # JSON list[str]
+    version = Column(Integer, default=1)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ParamChangeLog(Base):
+    """Auditable parameter changes made by adaptive modules."""
+    __tablename__ = "param_change_log"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    source = Column(String, nullable=False)
+    old_params = Column(Text, nullable=False)
+    new_params = Column(Text, nullable=False)
+    reason = Column(Text, nullable=False)
+    version = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TrailingStopEvent(Base):
+    """Every exchange-side trailing stop change."""
+    __tablename__ = "trailing_stop_events"
+
+    id = Column(Integer, primary_key=True)
+    trade_id = Column(Integer, nullable=False, index=True)
+    symbol = Column(String, nullable=False, index=True)
+    old_stop = Column(Float, nullable=False)
+    new_stop = Column(Float, nullable=False)
+    mode = Column(String, nullable=False)
+    reason = Column(Text, nullable=False)
+    exchange_order_id = Column(String, nullable=True)
+    is_major = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CommandAudit(Base):
+    """Telegram command audit trail."""
+    __tablename__ = "command_audit"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(String, nullable=False)
+    command = Column(String, nullable=False)
+    args = Column(Text, nullable=True)
+    status = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SelfMonitorReport(Base):
+    """Hourly/daily self-diagnosis reports."""
+    __tablename__ = "self_monitor_reports"
+
+    id = Column(Integer, primary_key=True)
+    report_type = Column(String, nullable=False)
+    payload = Column(Text, nullable=False)
+    warning_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TelegramBotState(Base):
+    """Small key-value store for Telegram polling/report schedules."""
+    __tablename__ = "telegram_bot_state"
+
+    id = Column(Integer, primary_key=True)
+    key = Column(String, nullable=False, unique=True, index=True)
+    value = Column(Text, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 def get_session(db_path: str = "sqlite:///trading_agent.db"):

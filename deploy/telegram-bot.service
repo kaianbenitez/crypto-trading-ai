@@ -1,0 +1,19 @@
+[Unit]
+Description=Crypto Trading AI - Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/trading-ai
+Environment=PYTHONPATH=/root/trading-ai
+EnvironmentFile=/root/trading-ai/.env
+ExecStart=/root/trading-ai/venv/bin/python -m agent.telegram.service
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

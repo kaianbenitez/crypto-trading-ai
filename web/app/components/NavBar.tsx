@@ -13,14 +13,16 @@ export default function NavBar() {
   }
 
   return (
-    <nav className="flex items-center justify-between border-b border-zinc-800 bg-[#171717] px-6 py-3">
-      <div className="flex items-center gap-6">
-        <span className="font-semibold text-zinc-100">Crypto Trading AI</span>
-        <Link href="/" className="text-sm text-zinc-400 transition-colors hover:text-zinc-100">Dashboard</Link>
-        <Link href="/journal" className="text-sm text-zinc-400 transition-colors hover:text-zinc-100">Journal</Link>
-        <Link href="/signals" className="text-sm text-zinc-400 transition-colors hover:text-zinc-100">Signals</Link>
+    <nav style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "0 24px", height: 52, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text)", textDecoration: "none" }}>
+          <span style={{ width: 20, height: 20, background: "var(--accent)", borderRadius: 5, display: "inline-block" }} />
+          <span style={{ fontWeight: 700, fontSize: 14 }}>TradingAI</span>
+        </Link>
+        <Link href="/" style={{ color: "var(--muted)", fontSize: 13, textDecoration: "none" }}>Dashboard</Link>
+        <Link href="/journal" style={{ color: "var(--muted)", fontSize: 13, textDecoration: "none" }}>Journal</Link>
       </div>
-      <button onClick={handleLogout} className="text-sm text-zinc-400 transition-colors hover:text-zinc-100">
+      <button onClick={handleLogout} style={{ background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: 13 }}>
         Logout
       </button>
     </nav>

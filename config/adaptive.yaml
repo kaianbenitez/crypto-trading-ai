@@ -1,0 +1,29 @@
+ensemble:
+  smc: 0.30
+  mean_reversion: 0.40
+  momentum_kama: 0.20
+  funding_basis: 0.10
+  min_leg_weight: 0.10
+  max_leg_weight: 0.50
+
+learning:
+  min_trades_for_adjust: 8
+  disable_leg_after_trades: 30
+  size_mult_bounds: [0.5, 1.5]
+  sl_atr_mult_bounds: [1.0, 3.5]
+  tp_atr_mult_bounds: [1.5, 5.0]
+  trail_atr_mult_bounds: [1.5, 3.5]
+
+trailing:
+  default_activation_r: 1.0
+  atr_multiplier_default: 2.2
+  atr_multiplier_bounds: [1.5, 3.5]
+  chandelier_atr_multiplier: 3.0
+  chandelier_lookback: 22
+  structure_lookback: 5
+  min_move_pct: 0.0005
+
+risk:
+  per_trade_risk_pct: 1.0
+  per_coin_exposure_pct: 15.0
+  daily_loss_circuit_pct: 3.0

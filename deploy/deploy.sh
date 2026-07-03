@@ -62,15 +62,16 @@ echo "=== Systemd services ==="
 cp "$PROJECT_DIR/deploy/trading-agent.service" /etc/systemd/system/
 cp "$PROJECT_DIR/deploy/webapi.service"        /etc/systemd/system/
 cp "$PROJECT_DIR/deploy/dashboard.service"     /etc/systemd/system/
+cp "$PROJECT_DIR/deploy/telegram-bot.service"  /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable trading-agent webapi dashboard
+systemctl enable trading-agent webapi dashboard telegram-bot
 systemctl restart dashboard
 
 if [ -f "$PROJECT_DIR/.env" ]; then
-    systemctl restart webapi trading-agent
+    systemctl restart webapi trading-agent telegram-bot
 else
     echo "WARNING: $PROJECT_DIR/.env is missing. Create it, then run:"
-    echo "  systemctl restart webapi trading-agent"
+    echo "  systemctl restart webapi trading-agent telegram-bot"
 fi
 
 echo ""

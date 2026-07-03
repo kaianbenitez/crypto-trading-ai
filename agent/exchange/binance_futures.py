@@ -1,4 +1,5 @@
 import ccxt
+from datetime import datetime, timezone
 
 from agent.config.settings import settings
 from agent.exchange.base import ExchangeAdapter, OHLCV, OrderResult
@@ -24,6 +25,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 "fapiPrivateV3": f"{base_url}/fapi/v3",
                 "fapiData": f"{base_url}/futures/data",
             })
+
+    def _raw_symbol(self, symbol: str) -> str:
+        try:
+            return self._client.market_id(symbol)
+        except Exception:
+            return symbol.split(":", 1)[0].replace("/", "").upper()
 
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int = 500) -> list[OHLCV]:
         raw = self._client.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
@@ -74,5 +81,89 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         positions = self._client.fetch_positions()
         return [p for p in positions if float(p.get("contracts") or 0) != 0]
 
+    def fetch_open_algo_orders(self, symbol: str) -> list[dict]:
+        return self._client.fapiPrivateGetOpenAlgoOrders({"symbol": self._raw_symbol(symbol)})
+
     def cancel_order(self, symbol: str, order_id: str) -> None:
-        self._client.cancel_order(order_id, symbol)
+        try:
+            self._client.cancel_order(order_id, symbol)
+            return
+        except Exception as standard_error:
+            try:
+                self._client.fapiPrivateDeleteAlgoOrder({
+                    "symbol": self._raw_symbol(symbol),
+                    "algoId": str(order_id),
+                })
+                return
+            except Exception:
+                raise standard_error
+
+    def fetch_order(self, symbol: str, order_id: str) -> dict:
+        try:
+            return self._client.fetch_order(order_id, symbol)
+        except Exception:
+            return self._client.fapiPrivateGetAlgoOrder({
+                "symbol": self._raw_symbol(symbol),
+                "algoId": str(order_id),
+            })
+
+    def fetch_my_trades(self, symbol: str, since_ms: int | None = None, limit: int = 50) -> list[dict]:
+        return self._client.fetch_my_trades(symbol, since=since_ms, limit=limit)
+
+    def get_exit_fill(
+        self,
+        symbol: str,
+        trade_side: str,
+        opened_at: datetime | None,
+        expected_qty: float,
+    ) -> dict | None:
+        """Return average exit fill from account trades after the entry.
+
+        The orchestrator can notice an exchange-side SL/TP after the position is
+        already gone. In that case, using the current candle close understates or
+        overstates the real result. Binance account trades are the closest source
+        of truth for actual fill price.
+        """
+        if opened_at is None:
+            return None
+
+        if opened_at.tzinfo is None:
+            opened_at = opened_at.replace(tzinfo=timezone.utc)
+        since_ms = int(opened_at.timestamp() * 1000) - 60_000
+        exit_side = "sell" if trade_side == "long" else "buy"
+
+        fills = []
+        for fill in self.fetch_my_trades(symbol, since_ms=since_ms, limit=100):
+            if str(fill.get("side", "")).lower() != exit_side:
+                continue
+            amount = float(fill.get("amount") or 0)
+            price = float(fill.get("price") or 0)
+            if amount <= 0 or price <= 0:
+                continue
+            fills.append(fill)
+
+        if not fills:
+            return None
+
+        qty = 0.0
+        notional = 0.0
+        order_ids = []
+        for fill in fills:
+            amount = float(fill.get("amount") or 0)
+            price = float(fill.get("price") or 0)
+            qty += amount
+            notional += amount * price
+            if fill.get("order"):
+                order_ids.append(str(fill["order"]))
+            if expected_qty > 0 and qty >= expected_qty * 0.98:
+                break
+
+        if qty <= 0:
+            return None
+
+        return {
+            "price": notional / qty,
+            "qty": qty,
+            "order_ids": order_ids,
+            "fills": fills,
+        }
