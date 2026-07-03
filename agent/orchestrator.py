@@ -76,15 +76,29 @@ log = logging.getLogger(__name__)
 def _tg(message: str) -> None:
     if not settings.telegram_bot_token or not settings.telegram_chat_id:
         return
+    import requests
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
     try:
-        import requests
-        requests.post(
-            f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
+        r = requests.post(
+            url,
             json={"chat_id": settings.telegram_chat_id, "text": message, "parse_mode": "Markdown"},
             timeout=10,
         )
+        if r.status_code == 200:
+            return
+        log.warning(f"Telegram Markdown send failed ({r.status_code}): {r.text[:200]} — retrying as plain text")
     except Exception as e:
-        log.warning(f"Telegram send failed: {e}")
+        log.warning(f"Telegram Markdown send raised: {e} — retrying as plain text")
+
+    # Fallback: strip Markdown formatting chars and send as plain text so
+    # a malformed thesis/reflection string never silently drops a notification.
+    plain = message.replace("`", "").replace("*", "").replace("_", "")
+    try:
+        r = requests.post(url, json={"chat_id": settings.telegram_chat_id, "text": plain}, timeout=10)
+        if r.status_code != 200:
+            log.error(f"Telegram plain-text send also failed ({r.status_code}): {r.text[:200]}")
+    except Exception as e:
+        log.error(f"Telegram send failed completely: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -471,12 +485,6 @@ def _check_close(adapter, session, risk, state) -> bool:
     except Exception as e:
         log.warning(f"[{state.symbol}] Roster update failed: {e}")
 
-    emoji = "✅" if outcome == "win" else "❌"
-    msg = (
-        f"{emoji} {state.symbol} {trade.side.upper()} CLOSED\n"
-        f"Exit: {exit_price:.4f} | PnL: {raw_pnl:+.2f} USDT | {outcome.upper()}\n"
-        f"Reason: {exit_reason}"
-    )
     msg = tg_templates.closed(
         state.symbol,
         trade.side,
