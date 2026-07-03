@@ -193,7 +193,7 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
         </div>
       </div>
 
-      <div className="position-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 10, padding: 10, alignItems: "start" }}>
+      <div className="position-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 260px", gap: 10, padding: 10, alignItems: "start" }}>
         <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, alignSelf: "start" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
             <div>
@@ -228,33 +228,27 @@ function DetailedOpenPosition({ detail, payload }: { detail: OpenPositionDetail;
 
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
             {[
               ["Confidence", confidence !== undefined ? confidence.toFixed(2) : "..."],
               ["EV", mtfEv !== undefined ? `${mtfEv.toFixed(2)}R` : "..."],
               ["Qty", price4.format(trade.qty)],
               ["Opened", new Date(trade.opened_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })],
             ].map(([label, value]) => (
-              <div key={label} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
+              <div key={label} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 9px" }}>
                 <div style={{ color: "var(--muted)", fontSize: 10 }}>{label}</div>
                 <div style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{value}</div>
               </div>
             ))}
           </div>
 
-          {[
-            ["Thesis", detail.reasoning.thesis],
-            ["Now", detail.reasoning.now],
-            ["Next", detail.reasoning.next],
-          ].map(([label, lines]) => (
-            <div key={label as string} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px" }}>
-              <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>{label as string}</div>
-              {(lines as string[]).slice(0, label === "Thesis" ? 2 : 1).map((line, idx) => (
-                <div key={idx} style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.45, marginTop: idx ? 4 : 0 }}>{line}</div>
-              ))}
+          <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
+            <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 4 }}>Thesis</div>
+            <div style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.35 }}>
+              {(detail.reasoning.thesis[0] || trade.strategy_name).replace(/\s+/g, " ")}
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </div>
