@@ -61,13 +61,6 @@ def friendly_trail_mode(mode: str | None) -> str:
 # Pattern-based rewrites for known reasoning line shapes
 # ---------------------------------------------------------------------------
 
-def _f(x) -> str:
-    try:
-        return f"{float(x):.1f}"
-    except (TypeError, ValueError):
-        return str(x)
-
-
 _PATTERNS: list[tuple[re.Pattern, callable]] = []
 
 
@@ -80,8 +73,8 @@ def _rule(pattern: str):
 
 @_rule(r"^Regime: (\w+) \(ADX=([\d.]+)\)$")
 def _regime_line(m):
-    regime, adx = m.group(1), _f(m.group(2))
-    return f"Market read: {friendly_regime(regime)} (trend-strength score {adx} — above 20 usually means a real trend)."
+    regime = m.group(1)
+    return f"Market read: {friendly_regime(regime)}."
 
 
 @_rule(r"^ATR ratio ([\d.]+)× baseline — shock/event in progress, standing aside$")
@@ -126,7 +119,7 @@ def _ema_bear_intact(m):
 
 @_rule(r"^ADX ([\d.]+) confirms directional trend$")
 def _adx_confirms(m):
-    return f"Trend-strength score is {_f(m.group(1))} — strong enough to trust the direction."
+    return "The trend looks strong enough to trust the direction."
 
 
 @_rule(r"^No trend signal: (.*)$")
@@ -136,37 +129,37 @@ def _no_trend(m):
 
 @_rule(r"^RSI \(([\d.]+)\) oversold \+ price at lower BB — strong mean-reversion setup$")
 def _mr_strong_long(m):
-    return f"Price dropped further than usual and looks stretched down (score {_f(m.group(1))}/100, low = stretched) while sitting near the bottom of its typical range — setups like this often bounce."
+    return "Price dropped further than usual and is sitting near the bottom of its recent range — setups like this often bounce back up."
 
 
 @_rule(r"^RSI \(([\d.]+)\) overbought \+ price at upper BB — strong mean-reversion setup$")
 def _mr_strong_short(m):
-    return f"Price rose further than usual and looks stretched up (score {_f(m.group(1))}/100, high = stretched) while sitting near the top of its typical range — setups like this often pull back."
+    return "Price rose further than usual and is sitting near the top of its recent range — setups like this often pull back down."
 
 
 @_rule(r"^RSI \(([\d.]+)\) oversold — moderate mean-reversion setup$")
 def _mr_mod_long_rsi(m):
-    return f"Price looks a bit stretched to the downside (score {_f(m.group(1))}/100) — might bounce, moderate confidence."
+    return "Price looks a bit stretched to the downside — might bounce, but this is a weaker signal."
 
 
 @_rule(r"^Price at lower Bollinger Band — moderate mean-reversion setup$")
 def _mr_mod_long_bb(m):
-    return "Price is at the bottom edge of its typical trading range — might bounce, moderate confidence."
+    return "Price is at the bottom edge of its typical trading range — might bounce, but this is a weaker signal."
 
 
 @_rule(r"^RSI \(([\d.]+)\) overbought — moderate mean-reversion setup$")
 def _mr_mod_short_rsi(m):
-    return f"Price looks a bit stretched to the upside (score {_f(m.group(1))}/100) — might pull back, moderate confidence."
+    return "Price looks a bit stretched to the upside — might pull back, but this is a weaker signal."
 
 
 @_rule(r"^Price at upper Bollinger Band — moderate mean-reversion setup$")
 def _mr_mod_short_bb(m):
-    return "Price is at the top edge of its typical trading range — might pull back, moderate confidence."
+    return "Price is at the top edge of its typical trading range — might pull back, but this is a weaker signal."
 
 
 @_rule(r"^No RSI extreme \(RSI=([\d.]+)\) or BB touch$")
 def _mr_none(m):
-    return f"Price isn't stretched in either direction right now (score {_f(m.group(1))}/100) — no bounce setup."
+    return "Price isn't stretched in either direction right now — no bounce setup to trade."
 
 
 @_rule(r"^Structure bias BEARISH — confidence reduced \(counter-trend\)$")
@@ -236,7 +229,7 @@ def _pm_sl_generic(m):
 
 @_rule(r"^ADX was only ([\d.]+) at entry.*$")
 def _pm_adx_borderline(m):
-    return f"The trend wasn't very strong when we entered (score {_f(m.group(1))}, vs the usual 30+ bar for a solid trend) — may have been a borderline call."
+    return "The trend wasn't very strong when we entered — this may have been a borderline call."
 
 
 @_rule(r"^Volume confirmation was weak/absent.*$")

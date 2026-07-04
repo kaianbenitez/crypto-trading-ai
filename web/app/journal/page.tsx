@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AuthGate from "../components/AuthGate";
 import Sidebar from "../components/Sidebar";
 import { api, Trade } from "@/lib/api";
@@ -13,15 +14,16 @@ function outcomeColor(trade: Trade) {
   return trade.pnl_usdt >= 0 ? "var(--green)" : "var(--red)";
 }
 
-function TradeRow({ trade }: { trade: Trade }) {
-  const [open, setOpen] = useState(false);
+function TradeRow({ trade, isOpen, onToggle, rowRef, highlighted }: {
+  trade: Trade; isOpen: boolean; onToggle: () => void; rowRef: (el: HTMLDivElement | null) => void; highlighted: boolean;
+}) {
   const color = outcomeColor(trade);
   const pnl = trade.pnl_usdt == null ? "open" : `${trade.pnl_usdt >= 0 ? "+" : ""}${money.format(trade.pnl_usdt)} USDT`;
 
   return (
-    <div style={{ borderBottom: "1px solid var(--border)" }}>
+    <div ref={rowRef} style={{ borderBottom: "1px solid var(--border)", background: highlighted ? "var(--surface2)" : "transparent" }}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={onToggle}
         style={{
           width: "100%",
           background: "transparent",
@@ -53,15 +55,15 @@ function TradeRow({ trade }: { trade: Trade }) {
         </div>
       </button>
 
-      {open && (
+      {isOpen && (
         <div style={{ background: "var(--surface2)", borderTop: "1px solid var(--border)", padding: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(120px, 1fr))", gap: 10, marginBottom: 14 }} className="journal-detail-grid">
             {[
               ["Entry", price.format(trade.entry_price)],
               ["Exit", trade.exit_price == null ? "-" : price.format(trade.exit_price)],
-              ["SL", price.format(trade.stop_loss)],
-              ["TP", price.format(trade.take_profit)],
-              ["Risked", `$${money.format(
+              ["Stop Loss", price.format(trade.stop_loss)],
+              ["Take Profit", price.format(trade.take_profit)],
+              ["At risk", `$${money.format(
                 typeof (trade.indicator_snapshot as Record<string, unknown>)?.actual_risk_usdt === "number"
                   ? (trade.indicator_snapshot as Record<string, number>).actual_risk_usdt
                   : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty
@@ -76,19 +78,19 @@ function TradeRow({ trade }: { trade: Trade }) {
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }} className="journal-notes-grid">
             <div>
-              <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>Entry reasoning</div>
+              <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>Thesis — why the agent opened this trade</div>
               <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>
                 {trade.entry_reasoning.map((r, i) => <li key={i}>{r}</li>)}
               </ul>
             </div>
             <div>
-              <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>Post-mortem</div>
+              <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>What we learned</div>
               {trade.postmortem.length > 0 ? (
                 <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>
                   {trade.postmortem.map((r, i) => <li key={i}>{r}</li>)}
                 </ul>
               ) : (
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>No post-mortem yet.</div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>No post-mortem yet — this trade is still open.</div>
               )}
             </div>
           </div>
@@ -99,12 +101,25 @@ function TradeRow({ trade }: { trade: Trade }) {
 }
 
 function JournalContent() {
+  const searchParams = useSearchParams();
+  const highlightId = searchParams.get("trade") ? Number(searchParams.get("trade")) : null;
+
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [openId, setOpenId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   useEffect(() => {
     api.trades(100).then(setTrades).catch(() => setError("Could not load trades"));
   }, []);
+
+  useEffect(() => {
+    if (highlightId === null || trades.length === 0) return;
+    setOpenId(highlightId);
+    const el = rowRefs.current[highlightId];
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightId, trades.length]);
 
   const stats = useMemo(() => {
     const closed = trades.filter(t => t.closed_at);
@@ -144,7 +159,16 @@ function JournalContent() {
 
         <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
           {trades.length > 0 ? (
-            trades.map((trade) => <TradeRow key={trade.id} trade={trade} />)
+            trades.map((trade) => (
+              <TradeRow
+                key={trade.id}
+                trade={trade}
+                isOpen={openId === trade.id}
+                onToggle={() => setOpenId(openId === trade.id ? null : trade.id)}
+                rowRef={(el) => { rowRefs.current[trade.id] = el; }}
+                highlighted={highlightId === trade.id}
+              />
+            ))
           ) : (
             <div style={{ padding: 32, color: "var(--muted)", textAlign: "center", fontSize: 13 }}>No trades logged yet.</div>
           )}
@@ -157,7 +181,9 @@ function JournalContent() {
 export default function Page() {
   return (
     <AuthGate>
-      <JournalContent />
+      <Suspense fallback={<div style={{ padding: 32, color: "var(--muted)" }}>Loading…</div>}>
+        <JournalContent />
+      </Suspense>
     </AuthGate>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { AgentStatus, api, CandlePayload, CoinDigest, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
 import { money, pct, pnlColor, price4 } from "@/lib/format";
 import AuthGate from "./components/AuthGate";
@@ -198,12 +199,11 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
 
         <PnlBar trade={trade} currentPrice={currentPrice} tall />
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: note ? 10 : 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
           {[
-            ["Safety stop", price4.format(trade.stop_loss), "var(--red)"],
+            ["Stop Loss", price4.format(trade.stop_loss), "var(--red)"],
             ["Entry", price4.format(trade.entry_price), "var(--accent)"],
-            ["Target", price4.format(trade.take_profit), "var(--green)"],
-            ["Risked", `$${money.format(riskedAmt)}`, "var(--muted)"],
+            ["Take Profit", price4.format(trade.take_profit), "var(--green)"],
           ].map(([label, value, color]) => (
             <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 9px" }}>
               <div style={{ color: color as string, fontSize: 11, fontWeight: 700 }}>{label}</div>
@@ -212,10 +212,14 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
           ))}
         </div>
 
+        <div style={{ color: "var(--muted)", fontSize: 10.5, marginBottom: note ? 10 : 0 }}>
+          ${money.format(riskedAmt)} at risk · qty {price4.format(trade.qty)}
+        </div>
+
         {note && (
           <div style={{ paddingTop: 8, borderTop: "1px solid var(--border)" }}>
             <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
-              Why the agent opened this trade
+              Thesis
             </div>
             <div style={{ color: "var(--text)", fontSize: 11.5, lineHeight: 1.45 }}>
               {note}
@@ -263,11 +267,10 @@ function OpenPosition({ trade }: { trade: Trade }) {
         <span>TP {price4.format(trade.take_profit)}</span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
         {[
           { label: "Leverage", value: `${trade.leverage}×` },
           { label: "Qty", value: trade.qty ? price4.format(trade.qty) : "—" },
-          { label: "Risked", value: `$${money.format(riskedAmt)}` },
           { label: "Opened", value: new Date(trade.opened_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
         ].map(({ label, value }) => (
           <div key={label} style={{ background: "var(--surface2)", borderRadius: 8, padding: "8px 10px" }}>
@@ -277,10 +280,14 @@ function OpenPosition({ trade }: { trade: Trade }) {
         ))}
       </div>
 
+      <div style={{ color: "var(--muted)", fontSize: 10.5, marginTop: 8 }}>
+        ${money.format(riskedAmt)} at risk
+      </div>
+
       {trade.entry_reasoning[0] && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
           <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
-            Why the agent opened this trade
+            Thesis
           </div>
           <div style={{ color: "var(--text)", fontSize: 11, lineHeight: 1.5 }}>
             {trade.entry_reasoning[0]}
@@ -289,6 +296,19 @@ function OpenPosition({ trade }: { trade: Trade }) {
       )}
     </div>
   );
+}
+
+// Exit reasons that are obvious from the win/loss color + amount already
+// shown — no need to spell them out. Anything else (trailing exits, manual
+// fixes, forced closes) is genuinely useful context, so it's kept.
+const OBVIOUS_EXIT_REASONS = new Set(["take_profit", "stop_loss"]);
+const EXIT_REASON_LABEL: Record<string, string> = {
+  trailing_take_profit: "Trailing stop locked in the win",
+  manual_reconcile_duplicate: "Closed manually (duplicate fix)",
+};
+function noteworthyExitReason(reason: string | null): string | null {
+  if (!reason || OBVIOUS_EXIT_REASONS.has(reason)) return null;
+  return EXIT_REASON_LABEL[reason] ?? reason.replace(/_/g, " ");
 }
 
 // ── trade card (compact, used in a responsive grid instead of full-width rows) ─
@@ -300,8 +320,12 @@ function TradeRow({ trade }: { trade: Trade }) {
   const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
     ? snapshot.actual_risk_usdt
     : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
+  const footerNote = noteworthyExitReason(trade.exit_reason) ?? trade.entry_reasoning[0] ?? "—";
   return (
-    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+    <Link
+      href={`/journal?trade=${trade.id}`}
+      style={{ color: "inherit", textDecoration: "none", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, cursor: "pointer" }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <CoinLogo symbol={trade.symbol} size={20} />
         <span style={{ fontWeight: 600, fontSize: 13, flex: 1, minWidth: 0 }}>{trade.symbol.replace("/USDT", "")}</span>
@@ -323,12 +347,12 @@ function TradeRow({ trade }: { trade: Trade }) {
         </span>
       </div>
       <div style={{ color: "var(--muted)", fontSize: 10.5 }}>
-        Risked ${money.format(riskedAmt)}
+        ${money.format(riskedAmt)} at risk
       </div>
       <div style={{ color: "var(--muted)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {trade.exit_reason || trade.entry_reasoning[0] || "—"}
+        {footerNote}
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -533,7 +557,7 @@ function Dashboard() {
           <StatCard label="Bankroll" value={summary ? `$${money.format(summary.bankroll_usdt)}` : "—"} sub="USDT balance" loading={loading} accent="var(--accent)" />
           <StatCard label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub="all-time" loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />
           <StatCard label="Realized P&L" value={closedTrades.length ? `${totalPnl >= 0 ? "+" : ""}$${money.format(totalPnl)}` : "—"} color={pnlColor(totalPnl)} sub={`${closedTrades.length} closed trades`} loading={loading} accent={pnlColor(totalPnl)} />
-          <StatCard label="Win Rate" value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"} sub={summary ? `${summary.total_trades} total` : undefined} loading={loading} />
+          <StatCard label="Win Rate" value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"} sub={summary ? `${summary.total_trades} total` : undefined} loading={loading} accent={summary ? (summary.win_rate_pct >= 50 ? "var(--green)" : "var(--amber)") : undefined} />
           <StatCard label="Open" value={summary ? String(summary.open_positions) : "—"} color={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} sub="positions" loading={loading} accent={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} />
           <StatCard label="Macro" value={regimeMeta.label} color={regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regimeMeta.color} />
         </div>
