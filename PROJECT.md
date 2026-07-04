@@ -37,10 +37,14 @@ No LLM is allowed in the live trading or execution loop.
 - Risk defaults:
   - `MAX_RISK_PER_TRADE_PCT=1.5`
   - Treat `1.5%` as the ceiling, not a guaranteed fixed size.
-  - Actual risk can be reduced by macro regime sizing and per-coin brain sizing.
-  - Example: `BANKROLL_USDT=1000`, `MAX_RISK_PER_TRADE_PCT=1.5`, macro size `0.70` means effective trade risk is `10.50 USDT` / `1.05%`.
-  - `MAX_DAILY_DRAWDOWN_PCT=5`
-  - `MAX_CONCURRENT_POSITIONS=1`
+  - Actual risk can be reduced by macro regime sizing, per-coin brain sizing, risk tier, and slot splitting.
+  - Normal tier is `1.0%`; with `MAX_CONCURRENT_POSITIONS=2` and `SPLIT_RISK_ACROSS_SLOTS=true`, target risk is about `0.5%` per slot.
+  - `MAX_DAILY_DRAWDOWN_PCT=3`
+  - `MAX_CONCURRENT_POSITIONS=2`
+  - `MAX_PORTFOLIO_RISK_PCT=1.5` caps total open risk.
+  - `MAX_SAME_DIRECTION_RISK_PCT=1.5` caps same-direction BTC-beta exposure.
+  - `MIN_ENTRY_RISK_PCT=0.25` rejects tiny leftovers after cap downsizing.
+  - `MIN_STOP_COST_MULTIPLE=5`
   - `DEFAULT_LEVERAGE=3`
   - `MAX_LEVERAGE=5`
 - Paper trading duration: 30 days minimum before live trading
@@ -119,8 +123,13 @@ BINANCE_API_SECRET=<stored on VPS only>
 BINANCE_TESTNET=true
 BANKROLL_USDT=1000
 MAX_RISK_PER_TRADE_PCT=1.5
-MAX_DAILY_DRAWDOWN_PCT=5
-MAX_CONCURRENT_POSITIONS=1
+MAX_DAILY_DRAWDOWN_PCT=3
+MAX_CONCURRENT_POSITIONS=2
+SPLIT_RISK_ACROSS_SLOTS=true
+MAX_PORTFOLIO_RISK_PCT=1.5
+MAX_SAME_DIRECTION_RISK_PCT=1.5
+MIN_ENTRY_RISK_PCT=0.25
+MIN_STOP_COST_MULTIPLE=5
 DEFAULT_LEVERAGE=3
 MAX_LEVERAGE=5
 WEBAPI_PASSWORD_HASH=<stored on VPS only>
@@ -255,6 +264,72 @@ Every 1h candle close, per symbol:
    - Numeric params may be tuned within bounds.
    - Per-coin brain can adjust size/SL/TP/trailing within bounds after enough data.
    - Telegram alerts and scheduled reports are enabled when env vars are configured.
+
+## Trade Narrative Format
+
+Open/close Telegram messages, the dashboard open-position card, and the
+journal's expanded row are all built from `agent/dashboard/trade_narrative.py`
+(`build_narrative(trade, session)`), a deterministic template — no LLM in the
+loop, only formatting of data already on the `Trade` row.
+
+Sections produced:
+
+- **Thesis** — up to 2 signal-specific reasoning lines (EMA/RSI/MACD/SMC),
+  with the generic `"Regime: ..."` line filtered out (it's shown separately
+  as the strategy/regime label) so every trade's thesis isn't identical.
+- **Concern** — one line if a trade weakness was flagged at entry: structure
+  bias against the trade, a premium/discount-zone entry, a failing memory
+  pattern, or negative news sentiment. Omitted if none applied.
+- **Plan** — entry / stop-loss / take-profit / R:R, plus risk % and risk USDT
+  read from `indicator_snapshot.actual_risk_pct` / `actual_risk_usdt`
+  (falls back to the planned values, then to `|entry-stop|*qty`).
+- **Invalidation** — strategy-specific ("EMA/MACD flips against the trade"
+  for trend_following, "price keeps pushing into the extreme" for
+  mean_reversion).
+- **Past context** — the last same-symbol trade's outcome, via a lightweight
+  `session.query(Trade)` lookback; omitted if there's no prior trade.
+- **Postmortem (closed only)** — the failure/result line ties directly back
+  to the entry-time concern when one existed (e.g. "this looks more like
+  premium-zone risk than a normal pullback") instead of a generic
+  explanation, plus a lesson line and compact stats (`Exit reason | R | Held`).
+
+Telegram format example (`agent/telegram/templates.py`):
+
+```
+🟢 LONG | AVAX/USDT | trend_following
+Conf 0.50 | EV +1.66R | Risk 0.45%
+
+Thesis:
+Trend is bullish: price above EMA, MACD positive, ADX confirms strength.
+Concern: entry is late because price is near the premium/high end of range.
+
+Plan:
+Entry 6.86 | SL 6.79 | TP 7.01 | R:R 2.0
+Invalidation: SL hit or trend loses EMA support.
+
+Past context:
+Last AVAX trade stopped out, so re-entry needs stronger evidence and better timing.
+```
+
+```
+🔴 CLOSED | AVAX/USDT | LOSS | -7.20 USDT
+
+Why it failed:
+Price hit the stop before the setup could play out. This looks more like
+premium/high-end-of-range risk than a normal pullback.
+
+Lesson:
+Don't treat a strong thesis as enough on its own when entry is near the
+premium/high end of range — require a stronger edge, a better entry, or
+smaller size in that situation.
+
+Stats:
+Exit reason: stop_loss | R: -1.0R | Held: 12m
+```
+
+Same sections are exposed to the frontend via:
+- `agent/dashboard/reasoning_engine.py` → `/api/open-positions-detail` (open positions)
+- `webapi/main.py` → `/api/trades/{id}/narrative` (journal, fetched on row expand)
 
 ## Backtest Notes
 

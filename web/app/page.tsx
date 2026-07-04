@@ -219,13 +219,28 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
         </div>
 
         {note && (
-          <div style={{ paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-            <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
-              Thesis
+          <div style={{ paddingTop: 8, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6 }}>
+            <div>
+              <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
+                Thesis
+              </div>
+              <div style={{ color: "var(--text)", fontSize: 11.5, lineHeight: 1.45 }}>
+                {note}
+              </div>
             </div>
-            <div style={{ color: "var(--text)", fontSize: 11.5, lineHeight: 1.45 }}>
-              {note}
+            {detail.reasoning.concern && (
+              <div style={{ color: "var(--amber)", fontSize: 11, lineHeight: 1.4 }}>
+                ⚠ Concern: {detail.reasoning.concern}
+              </div>
+            )}
+            <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>
+              Invalidation: {detail.reasoning.invalidation}
             </div>
+            {detail.reasoning.past_context && (
+              <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>
+                Past: {detail.reasoning.past_context}
+              </div>
+            )}
           </div>
         )}
       </div>

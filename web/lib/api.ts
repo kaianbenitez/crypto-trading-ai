@@ -52,8 +52,38 @@ export interface Trade {
 
 export interface PositionReasoning {
   thesis: string[];
+  concern: string | null;
+  invalidation: string;
+  past_context: string | null;
   now: string[];
   next: string[];
+}
+
+export interface TradeNarrative {
+  symbol: string;
+  side: string;
+  strategy_name: string;
+  regime: string;
+  confidence: number | null;
+  ev_r: number | null;
+  thesis_lines: string[];
+  concern_line: string | null;
+  entry: number;
+  stop_loss: number;
+  take_profit: number;
+  rr: number;
+  risk_pct: number | null;
+  risk_usdt: number | null;
+  invalidation_line: string;
+  past_context_line: string | null;
+  outcome: string | null;
+  exit_reason: string | null;
+  exit_price: number | null;
+  pnl_usdt: number | null;
+  r_multiple: number | null;
+  held_duration: string | null;
+  lesson_line: string | null;
+  failure_line: string | null;
 }
 
 export interface OpenPositionDetail {
@@ -231,6 +261,7 @@ export const api = {
   agentStatus: () => request<AgentStatus>("/api/agent-status"),
   trades: (limit = 100) => request<Trade[]>(`/api/trades?limit=${limit}`),
   trade: (id: number) => request<Trade>(`/api/trades/${id}`),
+  tradeNarrative: (id: number) => request<TradeNarrative>(`/api/trades/${id}/narrative`),
   openPositionDetails: () => request<OpenPositionDetail[]>("/api/open-positions-detail"),
   livePositions: () => request<LivePosition[]>("/api/live-positions"),
   coinDigests: () => request<CoinDigest[]>("/api/coin-digests"),

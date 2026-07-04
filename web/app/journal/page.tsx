@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AuthGate from "../components/AuthGate";
 import Sidebar from "../components/Sidebar";
-import { api, Trade } from "@/lib/api";
+import { api, Trade, TradeNarrative } from "@/lib/api";
 
 const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const price = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
@@ -19,6 +19,13 @@ function TradeRow({ trade, isOpen, onToggle, rowRef, highlighted }: {
 }) {
   const color = outcomeColor(trade);
   const pnl = trade.pnl_usdt == null ? "open" : `${trade.pnl_usdt >= 0 ? "+" : ""}${money.format(trade.pnl_usdt)} USDT`;
+  const [narrative, setNarrative] = useState<TradeNarrative | null>(null);
+  const [narrativeError, setNarrativeError] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || narrative || narrativeError) return;
+    api.tradeNarrative(trade.id).then(setNarrative).catch(() => setNarrativeError(true));
+  }, [isOpen, narrative, narrativeError, trade.id]);
 
   return (
     <div ref={rowRef} style={{ borderBottom: "1px solid var(--border)", background: highlighted ? "var(--surface2)" : "transparent" }}>
@@ -76,24 +83,53 @@ function TradeRow({ trade, isOpen, onToggle, rowRef, highlighted }: {
             ))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }} className="journal-notes-grid">
-            <div>
-              <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>Thesis — why the agent opened this trade</div>
-              <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>
-                {trade.entry_reasoning.map((r, i) => <li key={i}>{r}</li>)}
-              </ul>
-            </div>
-            <div>
-              <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 6 }}>What we learned</div>
-              {trade.postmortem.length > 0 ? (
-                <ul style={{ margin: 0, paddingLeft: 18, color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>
-                  {trade.postmortem.map((r, i) => <li key={i}>{r}</li>)}
-                </ul>
-              ) : (
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>No post-mortem yet — this trade is still open.</div>
+          {!narrative ? (
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>{narrativeError ? "Could not load reasoning." : "Loading reasoning…"}</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, color: "var(--muted)" }}>
+                {narrative.confidence !== null && <span>Conf {narrative.confidence.toFixed(2)}</span>}
+                {narrative.ev_r !== null && <span>EV {narrative.ev_r >= 0 ? "+" : ""}{narrative.ev_r.toFixed(2)}R</span>}
+                {narrative.risk_pct !== null && <span>Risk {narrative.risk_pct.toFixed(2)}%</span>}
+                <span>R:R {narrative.rr.toFixed(1)}</span>
+              </div>
+
+              <div>
+                <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Thesis</div>
+                <div style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>{narrative.thesis_lines.join(" ")}</div>
+              </div>
+
+              {narrative.concern_line && (
+                <div style={{ color: "var(--amber)", fontSize: 12, lineHeight: 1.5 }}>⚠ Concern: {narrative.concern_line}</div>
+              )}
+
+              <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>Invalidation: {narrative.invalidation_line}</div>
+
+              {narrative.past_context_line && (
+                <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>Past context: {narrative.past_context_line}</div>
+              )}
+
+              {narrative.outcome && (
+                <>
+                  <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+                    <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
+                      {narrative.outcome === "loss" ? "Why it failed" : "Result"}
+                    </div>
+                    <div style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>{narrative.failure_line}</div>
+                  </div>
+                  {narrative.lesson_line && (
+                    <div>
+                      <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Lesson</div>
+                      <div style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>{narrative.lesson_line}</div>
+                    </div>
+                  )}
+                  <div style={{ color: "var(--muted)", fontSize: 11 }}>
+                    Exit reason: {narrative.exit_reason || "—"} · R: {narrative.r_multiple !== null ? `${narrative.r_multiple >= 0 ? "+" : ""}${narrative.r_multiple.toFixed(1)}R` : "—"} · Held: {narrative.held_duration || "—"}
+                  </div>
+                </>
               )}
             </div>
-          </div>
+          )}
         </div>
       )}
     </div>

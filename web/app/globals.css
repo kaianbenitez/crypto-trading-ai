@@ -71,8 +71,7 @@ button, a {
 }
 
 @media (max-width: 860px) {
-  .journal-detail-grid,
-  .journal-notes-grid {
+  .journal-detail-grid {
     grid-template-columns: 1fr !important;
   }
 

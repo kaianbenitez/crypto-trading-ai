@@ -13,6 +13,7 @@ from agent.exchange.binance_futures import BinanceFuturesAdapter
 from agent.dashboard.candlestick_panel import build_candlestick_payload
 from agent.dashboard.plain_english import simplify_lines
 from agent.dashboard.reasoning_engine import position_reasoning
+from agent.dashboard.trade_narrative import build_narrative
 from agent.risk.bankroll import latest_risk_snapshot
 from webapi import app_state  # noqa: F401 (registers AgentState on the shared Base)
 from webapi.app_state import get_or_create_state
@@ -84,6 +85,29 @@ def get_trade(trade_id: int, session=Depends(db), _=Depends(require_session)):
         pnl_usdt=t.pnl_usdt, outcome=t.outcome, exit_reason=t.exit_reason,
         postmortem=simplify_lines(t.get_postmortem()), opened_at=t.opened_at, closed_at=t.closed_at,
     )
+
+
+@app.get("/api/trades/{trade_id}/narrative")
+def trade_narrative(trade_id: int, session=Depends(db), _=Depends(require_session)):
+    """Structured thesis/concern/plan/invalidation/past-context (and, once
+    closed, failure/lesson/stats) — the same sections shown in the Telegram
+    open/close notifications, for the Journal's expanded row instead of a
+    flat dump of every reasoning line."""
+    t = session.query(Trade).get(trade_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    n = build_narrative(t, session)
+    return {
+        "symbol": n.symbol, "side": n.side, "strategy_name": n.strategy_name, "regime": n.regime,
+        "confidence": n.confidence, "ev_r": n.ev_r,
+        "thesis_lines": n.thesis_lines, "concern_line": n.concern_line,
+        "entry": n.entry, "stop_loss": n.stop_loss, "take_profit": n.take_profit, "rr": n.rr,
+        "risk_pct": n.risk_pct, "risk_usdt": n.risk_usdt,
+        "invalidation_line": n.invalidation_line, "past_context_line": n.past_context_line,
+        "outcome": n.outcome, "exit_reason": n.exit_reason, "exit_price": n.exit_price,
+        "pnl_usdt": n.pnl_usdt, "r_multiple": n.r_multiple, "held_duration": n.held_duration,
+        "lesson_line": n.lesson_line, "failure_line": n.failure_line,
+    }
 
 
 @app.get("/api/summary", response_model=SummaryOut)
@@ -208,7 +232,7 @@ def open_positions_detail(session=Depends(db), _=Depends(require_session)):
                     .filter(TrailingStopEvent.trade_id == t.id)
                     .count()
                 ),
-            }),
+            }, session=session),
         }
         for t in trades
     ]

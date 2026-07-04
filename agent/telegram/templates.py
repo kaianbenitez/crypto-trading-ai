@@ -7,13 +7,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from agent.dashboard.plain_english import (
-    friendly_exit_reason,
     friendly_regime,
     friendly_strategy,
     friendly_trail_mode,
     simplify_line,
-    simplify_lines,
 )
+from agent.dashboard.trade_narrative import build_narrative
 
 MANILA = ZoneInfo("Asia/Manila")
 
@@ -22,35 +21,56 @@ def _ts() -> str:
     return datetime.now(MANILA).strftime("%d %b %Y, %H:%M PH")
 
 
-def opened(symbol: str, side: str, entry: float, stop: float, take_profit: float, qty: float, leg: str, regime: str, confidence: float, thesis: list[str]) -> str:
-    simplified = simplify_lines(thesis)[:2] or ["This setup passed our entry checks."]
-    thesis_text = "\n".join(f"• {line}" for line in simplified)
-    rr = abs(take_profit - entry) / max(abs(entry - stop), 1e-9)
-    return (
-        f"🟢 OPENED | {symbol} {side.upper()}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Entry: `{entry:.4f}`  Size: `{qty:.5f}`\n"
-        f"🛑 Safety stop: `{stop:.4f}`  🎯 Target: `{take_profit:.4f}`\n"
-        f"Potential reward vs risk: `{rr:.2f}x` (higher = better payoff for the risk)\n"
-        f"🧠 Style: {friendly_strategy(leg)}  🌡 Market: {friendly_regime(regime)}\n"
-        f"📊 Confidence: `{confidence:.2f}` (0–1 scale, higher = stronger setup)\n\n"
-        f"💭 Why we took this trade:\n{thesis_text}\n\n"
-        f"⏰ {_ts()}"
-    )
+def opened(trade, session=None) -> str:
+    """Structured open notification: direction/strategy, confidence+EV,
+    thesis, concern (trade weakness), plan, invalidation, and past
+    same-symbol context — all built deterministically from trade_narrative."""
+    n = build_narrative(trade, session)
+    icon = "🟢" if n.side == "long" else "🔴"
+    conf = f"{n.confidence:.2f}" if n.confidence is not None else "—"
+    ev = f"{n.ev_r:+.2f}R" if n.ev_r is not None else "—"
+    risk = f"{n.risk_pct:.2f}%" if n.risk_pct is not None else "—"
+
+    lines = [
+        f"{icon} {n.side.upper()} | {n.symbol} | {friendly_strategy(n.strategy_name)}",
+        f"Conf {conf} | EV {ev} | Risk {risk}",
+        "",
+        "Thesis:",
+        *n.thesis_lines,
+    ]
+    if n.concern_line:
+        lines.append(f"Concern: {n.concern_line}")
+    lines += [
+        "",
+        "Plan:",
+        f"Entry {n.entry:.4f} | SL {n.stop_loss:.4f} | TP {n.take_profit:.4f} | R:R {n.rr:.1f}",
+        f"Invalidation: {n.invalidation_line}",
+    ]
+    if n.past_context_line:
+        lines += ["", "Past context:", n.past_context_line]
+    lines += ["", f"⏰ {_ts()}"]
+    return "\n".join(lines)
 
 
-def closed(symbol: str, side: str, exit_price: float, pnl: float, outcome: str, reason: str, reflection: list[str] | None = None) -> str:
-    icon = "✅" if outcome == "win" else "🔴" if outcome == "loss" else "⚪"
-    outcome_word = {"win": "made money", "loss": "lost money", "breakeven": "broke even"}.get(outcome, outcome)
-    notes = "\n".join(f"• {line}" for line in simplify_lines(reflection or [reason])[:2])
-    return (
-        f"{icon} CLOSED | {symbol} {side.upper()}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Exit price: `{exit_price:.4f}`  Result: `{pnl:+.2f} USDT`\n"
-        f"This trade {outcome_word} — it {friendly_exit_reason(reason)}\n\n"
-        f"💭 What we learned:\n{notes}\n\n"
-        f"⏰ {_ts()}"
-    )
+def closed(trade, session=None) -> str:
+    """Structured close/postmortem: outcome, why it failed/worked tied back
+    to whatever concern was flagged at entry (not a generic restatement),
+    the lesson, and compact stats."""
+    n = build_narrative(trade, session)
+    icon = "✅" if n.outcome == "win" else "🔴" if n.outcome == "loss" else "⚪"
+    outcome_label = (n.outcome or "closed").upper()
+    pnl = n.pnl_usdt if n.pnl_usdt is not None else 0.0
+
+    lines = [f"{icon} CLOSED | {n.symbol} | {outcome_label} | {pnl:+.2f} USDT", ""]
+    if n.failure_line:
+        lines += ["Why it failed:" if n.outcome == "loss" else "Result:", n.failure_line, ""]
+    if n.lesson_line:
+        lines += ["Lesson:", n.lesson_line, ""]
+
+    r_txt = f"{n.r_multiple:+.1f}R" if n.r_multiple is not None else "—"
+    held_txt = n.held_duration or "—"
+    lines += ["Stats:", f"Exit reason: {n.exit_reason or '—'} | R: {r_txt} | Held: {held_txt}", "", f"⏰ {_ts()}"]
+    return "\n".join(lines)
 
 
 def trail(symbol: str, old_stop: float, new_stop: float, mode: str, reason: str) -> str:

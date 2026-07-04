@@ -1,34 +1,20 @@
 from agent.db.models import Trade
+from agent.dashboard.trade_narrative import build_narrative
 
 
-def generate_postmortem(trade: Trade) -> list[str]:
-    """Plain-English reasoning on why a closed trade won or lost, derived from
-    the entry snapshot vs the exit outcome. Used as input to the bounded tuner."""
+def generate_postmortem(trade: Trade, session=None) -> list[str]:
+    """Deterministic postmortem built from the same structured narrative used
+    for Telegram/dashboard. Ties the failure/lesson back to whatever concern
+    (e.g. premium-zone entry, counter-trend bias) was flagged at entry instead
+    of a generic post-hoc explanation, so the lesson is actually actionable."""
+    n = build_narrative(trade, session)
     notes = []
-    snapshot = trade.get_indicator_snapshot()
-    entry_reasoning = trade.get_entry_reasoning()
+    if n.failure_line:
+        notes.append(f"{'Why it failed' if trade.outcome == 'loss' else 'Result'}: {n.failure_line}")
+    if n.lesson_line:
+        notes.append(f"Lesson: {n.lesson_line}")
 
-    notes.append(f"Strategy '{trade.strategy_name}' in '{trade.regime}' regime, "
-                 f"exited via {trade.exit_reason}, outcome={trade.outcome}.")
-
-    if trade.outcome == "loss":
-        if trade.exit_reason == "stop_loss":
-            notes.append("Stop-loss was hit before price moved favorably — "
-                          "possible causes: stop too tight for current volatility (ATR), "
-                          "or entry signal was a false positive.")
-            adx = snapshot.get("adx")
-            if adx is not None and trade.regime == "trending" and float(adx) < 30:
-                notes.append(f"ADX was only {adx} at entry — borderline trend strength, "
-                              "regime classification may have been premature.")
-            if snapshot.get("vol_confirmed") is False:
-                notes.append("Volume confirmation was weak/absent despite signal firing — "
-                              "review volume filter strictness.")
-        else:
-            notes.append("Loss occurred without a clear stop-loss trigger reason logged — "
-                          "review exit logic.")
-    elif trade.outcome == "win":
-        notes.append("Entry conditions were validated by price action — "
-                      "reinforces current parameter set for this regime/strategy combo.")
-
-    notes.append(f"Entry reasoning was: {'; '.join(entry_reasoning)}")
+    r_txt = f"{n.r_multiple:+.1f}R" if n.r_multiple is not None else "—"
+    held_txt = n.held_duration or "—"
+    notes.append(f"Stats: Exit reason: {trade.exit_reason or '—'} | R: {r_txt} | Held: {held_txt}")
     return notes

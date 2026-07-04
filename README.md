@@ -11,8 +11,9 @@ for Binance Futures testnet validation before any live-money use.
 - Timeframe: 1h candles
 - Bankroll source: `BANKROLL_USDT`
 - Default bankroll: `1000` USDT
-- Default risk: `MAX_RISK_PER_TRADE_PCT=1.5`
-- Default max concurrent positions: `1`
+- Risk ceiling: `MAX_RISK_PER_TRADE_PCT=1.5`
+- Default max concurrent positions: `2`
+- Default admission: split active risk across slots, then enforce portfolio/same-direction caps
 - Active deployment: VPS/systemd
 
 ## What It Does
@@ -50,9 +51,15 @@ must be <= BANKROLL_USDT * leverage
 - macro regime size multiplier
 - per-coin brain size multiplier
 - tuned strategy params
+- active risk tier
+- slot splitting when `SPLIT_RISK_ACROSS_SLOTS=true`
+- portfolio and same-direction risk caps
 
-Example: with `BANKROLL_USDT=1000` and `MAX_RISK_PER_TRADE_PCT=1.5`, base risk is
-`15 USDT`. If macro size is `0.70`, trade risk becomes `10.50 USDT`.
+Example: with `BANKROLL_USDT=1000`, normal tier risk `1.0%`, and
+`MAX_CONCURRENT_POSITIONS=2`, the bot targets about `0.5%` per slot.
+That is about `5 USDT` risk per trade, with total open risk capped by
+`MAX_PORTFOLIO_RISK_PCT` and same-direction BTC-beta exposure capped by
+`MAX_SAME_DIRECTION_RISK_PCT`.
 
 ## Telegram Commands
 
@@ -97,8 +104,13 @@ BINANCE_TESTNET=true
 
 BANKROLL_USDT=1000
 MAX_RISK_PER_TRADE_PCT=1.5
-MAX_DAILY_DRAWDOWN_PCT=5
-MAX_CONCURRENT_POSITIONS=1
+MAX_DAILY_DRAWDOWN_PCT=3
+MAX_CONCURRENT_POSITIONS=2
+SPLIT_RISK_ACROSS_SLOTS=true
+MAX_PORTFOLIO_RISK_PCT=1.5
+MAX_SAME_DIRECTION_RISK_PCT=1.5
+MIN_ENTRY_RISK_PCT=0.25
+MIN_STOP_COST_MULTIPLE=5
 DEFAULT_LEVERAGE=3
 MAX_LEVERAGE=5
 
@@ -132,6 +144,33 @@ journalctl -u telegram-bot -n 80 --no-pager
 - `telegram-bot`: Telegram reports and two-way commands
 - `nginx`: public reverse proxy
 
+## Trade Narrative
+
+Every trade — open notification, close/postmortem, dashboard card, and journal
+entry — is built from one deterministic, template-based formatter
+(`agent/dashboard/trade_narrative.py`, no LLM involved). It reads only data
+already stored on the `Trade` row (`indicator_snapshot`, `entry_reasoning`,
+`params_snapshot`) plus a same-symbol lookback query, and produces:
+
+- **Direction/strategy** — side, symbol, strategy label
+- **Confidence + EV** — the signal's confidence score and expected value in R
+- **Thesis** — the specific signal reasons (EMA/RSI/MACD/SMC), with the
+  generic "Regime: ..." line filtered out since it's shown separately
+- **Concern** — a flagged trade weakness (e.g. counter-trend bias, premium/
+  discount-zone entry, a failing memory pattern) — omitted if none applies
+- **Plan** — entry / stop-loss / take-profit / R:R / risk % / risk USDT
+- **Invalidation** — what proves the thesis wrong (strategy-specific)
+- **Past context** — the last same-symbol trade's outcome, if any
+- **Postmortem (closed trades only)** — a failure/result line that ties
+  directly back to the entry-time concern when one was flagged (instead of a
+  generic explanation), a lesson, and compact stats (exit reason, R multiple,
+  hold duration)
+
+Telegram open/close messages, the dashboard's open-position card, and the
+journal's expanded row all render these same sections via
+`agent/telegram/templates.py`, `agent/dashboard/reasoning_engine.py`, and the
+`/api/trades/{id}/narrative` endpoint respectively.
+
 ## Dashboard
 
 The dashboard shows:
@@ -139,9 +178,11 @@ The dashboard shows:
 - bankroll, ROI, PnL, win rate, open positions
 - service/agent status
 - active symbol roster
-- open-position details with reasoning and chart context
+- open-position details with structured reasoning (thesis/concern/
+  invalidation/past-context) and chart context
 - recent closed trades
-- journal with entry reasoning and postmortem
+- journal with the same structured narrative sections per trade, fetched on
+  expand instead of a flat dump of every reasoning line
 
 ## Handoff Docs
 

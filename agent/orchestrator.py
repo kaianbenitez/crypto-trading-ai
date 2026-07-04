@@ -512,18 +512,7 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
         risk_amount_usdt=actual_risk_amount,
     )
 
-    msg = tg_templates.opened(
-        symbol=state.symbol,
-        side=signal.side.value,
-        entry=fill_price,
-        stop=plan.stop_loss,
-        take_profit=plan.take_profit,
-        qty=actual_qty,
-        leg=signal.strategy_name,
-        regime=trade.regime,
-        confidence=signal.confidence,
-        thesis=signal.reasoning,
-    )
+    msg = tg_templates.opened(trade, session)
     log.info(f"[{state.symbol}] " + msg.replace("\n", " | "))
     _tg(msg)
     return True
@@ -703,7 +692,7 @@ def _check_close(adapter, session, risk, state) -> bool:
     trade.exit_reason = exit_reason
     trade.closed_at   = datetime.now(timezone.utc)
 
-    postmortem = generate_postmortem(trade)
+    postmortem = generate_postmortem(trade, session)
     trade.set_postmortem(postmortem)
     session.commit()
 
@@ -757,15 +746,7 @@ def _check_close(adapter, session, risk, state) -> bool:
     except Exception as e:
         log.warning(f"[{state.symbol}] Roster update failed: {e}")
 
-    msg = tg_templates.closed(
-        state.symbol,
-        trade.side,
-        exit_price,
-        raw_pnl,
-        outcome,
-        exit_reason,
-        postmortem,
-    )
+    msg = tg_templates.closed(trade, session)
     log.info(f"[{state.symbol}] " + msg.replace("\n", " | "))
     _tg(msg)
 
