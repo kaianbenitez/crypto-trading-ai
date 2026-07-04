@@ -162,6 +162,22 @@ class SelfMonitorReport(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class RiskSnapshot(Base):
+    """Risk profile chosen by the bankroll manager."""
+    __tablename__ = "risk_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    effective_bankroll_usdt = Column(Float, nullable=False)
+    configured_bankroll_usdt = Column(Float, nullable=False)
+    account_equity_usdt = Column(Float, nullable=True)
+    risk_pct = Column(Float, nullable=False)
+    tier = Column(String, nullable=False)
+    mode = Column(String, nullable=False)
+    drawdown_pct = Column(Float, nullable=False, default=0.0)
+    reason = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class TelegramBotState(Base):
     """Small key-value store for Telegram polling/report schedules."""
     __tablename__ = "telegram_bot_state"
@@ -170,6 +186,37 @@ class TelegramBotState(Base):
     key = Column(String, nullable=False, unique=True, index=True)
     value = Column(Text, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CoinDigest(Base):
+    """Daily plain-English digest per coin: price action, what the agent is
+    watching for, and free keyword-scored news sentiment."""
+    __tablename__ = "coin_digests"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+
+    price_low_24h = Column(Float, nullable=True)
+    price_high_24h = Column(Float, nullable=True)
+    price_change_pct_24h = Column(Float, nullable=True)
+
+    regime = Column(String, nullable=True)
+    watching_side = Column(String, nullable=True)   # "long" | "short" | None
+    watch_low = Column(Float, nullable=True)
+    watch_high = Column(Float, nullable=True)
+
+    sentiment_score = Column(Float, nullable=True)   # -1..1, 0 = neutral/no data
+    sentiment_label = Column(String, nullable=True)  # positive | negative | neutral | no data
+    headlines = Column(Text, nullable=True)          # JSON list[str]
+
+    summary = Column(Text, nullable=False)           # plain-English paragraph
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    def set_headlines(self, headlines: list[str]):
+        self.headlines = json.dumps(headlines)
+
+    def get_headlines(self) -> list[str]:
+        return json.loads(self.headlines) if self.headlines else []
 
 
 def get_session(db_path: str = "sqlite:///trading_agent.db"):

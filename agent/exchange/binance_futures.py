@@ -40,6 +40,20 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         bal = self._client.fetch_balance()
         return float(bal.get(asset, {}).get("free", 0.0))
 
+    def get_account_equity(self, asset: str = "USDT") -> float:
+        bal = self._client.fetch_balance()
+        asset_row = bal.get(asset, {}) or {}
+        value = asset_row.get("total")
+        if value is None:
+            value = asset_row.get("free")
+        if value is None:
+            info = bal.get("info") or {}
+            for key in ("totalWalletBalance", "totalMarginBalance"):
+                if info.get(key) is not None:
+                    value = info[key]
+                    break
+        return float(value or 0.0)
+
     def set_leverage(self, symbol: str, leverage: int) -> None:
         leverage = max(1, min(leverage, settings.max_leverage))
         self._client.set_leverage(leverage, symbol)
@@ -50,6 +64,18 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             order_id=str(order["id"]),
             symbol=symbol,
             side=side,
+            qty=qty,
+            price=float(order.get("average") or order.get("price") or 0.0),
+            status=order.get("status", "unknown"),
+        )
+
+    def close_position_market(self, symbol: str, entry_side: str, qty: float) -> OrderResult:
+        close_side = "sell" if entry_side == "buy" else "buy"
+        order = self._client.create_order(symbol, "market", close_side, qty, params={"reduceOnly": True})
+        return OrderResult(
+            order_id=str(order["id"]),
+            symbol=symbol,
+            side=close_side,
             qty=qty,
             price=float(order.get("average") or order.get("price") or 0.0),
             status=order.get("status", "unknown"),

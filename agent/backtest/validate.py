@@ -19,6 +19,20 @@ BASE_PARAMS = {
     "atr_period": 14, "adx_period": 14,
     "vol_sma_period": 20, "vol_confirm_mult": 1.0,
     "max_risk_per_trade_pct": 1.5,
+    "min_ev_r": 0.25,
+    "enable_trailing_take_profit": True,
+    "tp_trail_activation_r": 1.6,
+    "tp_trail_min_locked_r": 0.5,
+    "tp_trail_min_ev_r": 0.35,
+    "reentry_tp_cooldown_candles": 2,
+    "reentry_sl_cooldown_candles": 4,
+    "reentry_tp_quality_window_candles": 8,
+    "reentry_sl_quality_window_candles": 12,
+    "reentry_min_ev_improvement_r": 0.25,
+    "reentry_min_conf_improvement": 0.08,
+    "reentry_max_trades_per_symbol_per_day": 3,
+    "reentry_min_ev_multiplier": 1.5,
+    "min_stop_cost_multiple": 5.0,
 }
 
 

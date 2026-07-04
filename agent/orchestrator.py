@@ -18,6 +18,7 @@ Hard rules:
 """
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -40,8 +41,12 @@ from agent.backtest.validate import BASE_PARAMS
 from agent.adapt.memory import save_lesson, apply_memory
 from agent.adapt.weights import update_weights, apply_weights
 from agent.adapt.roster import CoinRoster, CANDIDATE_SYMBOLS
+from agent.fundamental.coin_digest import apply_sentiment_adjustment, build_all_digests, save_digest
 from agent.fundamental.macro import assess_macro
 from agent.learning.per_coin_brain import PerCoinBrain
+from agent.risk.bankroll import BankrollManager
+from agent.risk.costs import estimate_round_trip_cost_r
+from agent.risk.reentry_guard import evaluate_reentry
 from agent.risk.trailing_stop_manager import TrailingStopManager
 from agent.telegram import templates as tg_templates
 
@@ -51,6 +56,7 @@ from agent.telegram import templates as tg_templates
 
 SYMBOLS    = CANDIDATE_SYMBOLS
 TIMEFRAME  = "1h"
+TIMEFRAME_HOURS = 1.0
 CANDLES    = 200
 POLL_SEC   = 60
 USE_SMC    = True
@@ -130,6 +136,159 @@ def _same_price(a: float | None, b: float | None, tolerance: float = 0.002) -> b
     return abs(float(a) - float(b)) / max(abs(float(b)), 1e-9) <= tolerance
 
 
+def _trade_params(trade: Trade, state) -> dict:
+    try:
+        params = trade.get_params_snapshot()
+        if params:
+            return params
+    except Exception:
+        pass
+    return state.params
+
+
+def _planned_prices(side: Side, entry_price: float, atr: float, params: dict) -> tuple[float, float]:
+    sl_distance = float(atr) * float(params.get("atr_mult_sl", 1.5))
+    tp_distance = float(atr) * float(params.get("atr_mult_tp", 3.0))
+    if side == Side.LONG:
+        return entry_price - sl_distance, entry_price + tp_distance
+    return entry_price + sl_distance, entry_price - tp_distance
+
+
+def _cost_context_r(row, side: Side, params: dict) -> tuple[float, float]:
+    entry_price = float(row.get("close") or 0)
+    atr = float(row.get("atr") or 0)
+    if entry_price <= 0 or atr <= 0:
+        return 0.0, float(params.get("min_ev_r", settings.min_live_ev_r))
+
+    stop_loss, take_profit = _planned_prices(side, entry_price, atr, params)
+    cost_r = estimate_round_trip_cost_r(
+        entry_price,
+        stop_loss,
+        take_profit,
+        taker_fee_pct=settings.taker_fee_pct,
+        slippage_pct=settings.slippage_pct,
+    )
+    min_required = max(
+        float(params.get("min_ev_r", settings.min_live_ev_r)),
+        cost_r + float(settings.min_edge_after_cost_r),
+    )
+    return cost_r, min_required
+
+
+def _live_position_snapshot(adapter, symbol: str) -> dict | None:
+    clean_sym = _normalize_position_symbol(symbol)
+    for pos in adapter.get_open_positions():
+        if _normalize_position_symbol(pos.get("symbol")) != clean_sym:
+            continue
+        qty = abs(float(pos.get("contracts") or 0.0))
+        entry = pos.get("entryPrice")
+        return {
+            "qty": qty,
+            "entry_price": float(entry) if entry is not None else None,
+        }
+    return None
+
+
+def _reduce_only_market_close(adapter, symbol: str, entry_side: str, qty: float) -> None:
+    adapter.close_position_market(symbol, entry_side, qty)
+
+
+def _candidate_score(signal) -> float:
+    """Rank setup quality before spending one of the limited risk slots."""
+    snapshot = signal.indicator_snapshot or {}
+    ev_r = float(snapshot.get("mtf_ev") or 0.0)
+    cost_r = float(snapshot.get("estimated_cost_r") or 0.0)
+    min_ev_r = float(snapshot.get("min_required_ev_r") or 0.0)
+    edge_after_floor = ev_r - max(cost_r, min_ev_r)
+    return round(edge_after_floor + float(signal.confidence or 0.0) * 0.35, 4)
+
+
+def _profit_r(trade: Trade, price: float) -> float:
+    initial_r = abs(float(trade.entry_price) - float(trade.stop_loss or trade.entry_price))
+    if initial_r <= 0:
+        return 0.0
+    direction = 1 if trade.side == "long" else -1
+    return ((float(price) - float(trade.entry_price)) * direction) / initial_r
+
+
+def _locked_r(trade: Trade) -> float:
+    initial_r = abs(float(trade.entry_price) - float(trade.stop_loss or trade.entry_price))
+    if initial_r <= 0:
+        return 0.0
+    direction = 1 if trade.side == "long" else -1
+    return ((float(trade.stop_loss) - float(trade.entry_price)) * direction) / initial_r
+
+
+def _trend_runner_eligible(trade: Trade) -> bool:
+    strategy = (trade.strategy_name or "").lower()
+    regime = (trade.regime or "").lower()
+    return (
+        "trend" in strategy
+        or "momentum" in strategy
+        or "kama" in strategy
+        or "trending" in regime
+        or "high_vol" in regime
+    )
+
+
+def _set_trade_snapshot(trade: Trade, updates: dict) -> None:
+    snapshot = trade.get_indicator_snapshot()
+    snapshot.update(updates)
+    trade.set_indicator_snapshot(snapshot)
+
+
+def _maybe_activate_trailing_take_profit(adapter, session, state, trade: Trade, df: pd.DataFrame, params: dict) -> bool:
+    if state.tp_trailing_active or not state.tp_order_id or not state.sl_order_id or df.empty:
+        return False
+    if not bool(params.get("enable_trailing_take_profit", True)):
+        return False
+    if not _trend_runner_eligible(trade):
+        return False
+
+    current_price = float(df.iloc[-1]["close"])
+    profit_r = _profit_r(trade, current_price)
+    activation_r = float(params.get("tp_trail_activation_r", 1.6))
+    if profit_r < activation_r:
+        return False
+
+    locked_r = _locked_r(trade)
+    min_locked_r = float(params.get("tp_trail_min_locked_r", 0.5))
+    if locked_r < min_locked_r:
+        return False
+
+    entry_snapshot = trade.get_indicator_snapshot()
+    entry_ev = float(entry_snapshot.get("mtf_ev") or 0)
+    min_ev = float(params.get("tp_trail_min_ev_r", 0.35))
+    if entry_ev and entry_ev < min_ev:
+        return False
+
+    try:
+        adapter.cancel_order(trade.symbol, state.tp_order_id)
+    except Exception as e:
+        log.warning(f"[{trade.symbol}] TP runner activation failed; could not cancel fixed TP: {e}")
+        return False
+
+    state.tp_order_id = None
+    state.tp_trailing_active = True
+    _set_trade_snapshot(trade, {
+        "tp_trailing_active": True,
+        "tp_trailing_activated_at": datetime.now(timezone.utc).isoformat(),
+        "tp_trailing_activation_r": round(profit_r, 2),
+        "tp_trailing_locked_r": round(locked_r, 2),
+    })
+    session.commit()
+
+    msg = (
+        f"🏁 TP RUNNER | {trade.symbol}\n"
+        f"Fixed TP cancelled; trailing SL is managing the exit.\n"
+        f"Current: +{profit_r:.2f}R | Locked: +{locked_r:.2f}R\n"
+        f"Why: trend setup reached runner threshold."
+    )
+    log.info(f"[{trade.symbol}] " + msg.replace("\n", " | "))
+    _tg(msg)
+    return True
+
+
 def _recover_protective_order_ids(adapter, state, trade) -> None:
     if not hasattr(adapter, "fetch_open_algo_orders"):
         return
@@ -163,6 +322,14 @@ def _recover_protective_order_ids(adapter, state, trade) -> None:
             f"SL={state.sl_order_id or '-'} TP={state.tp_order_id or '-'}"
         )
 
+    try:
+        snapshot = trade.get_indicator_snapshot()
+        if snapshot.get("tp_trailing_active") and not state.tp_order_id:
+            state.tp_trailing_active = True
+            log.info(f"[{trade.symbol}] Recovered TP runner state")
+    except Exception:
+        pass
+
 
 def _fetch_df(adapter, symbol: str) -> pd.DataFrame:
     candles = adapter.fetch_ohlcv(symbol, TIMEFRAME, limit=CANDLES)
@@ -192,8 +359,24 @@ class SymbolState:
         self.open_trade_id = None
         self.sl_order_id   = None
         self.tp_order_id   = None
-        self.params        = dict(BASE_PARAMS, context_window_candles=120, max_atr_ratio=2.5)
+        self.params        = dict(
+            BASE_PARAMS,
+            context_window_candles=120,
+            max_atr_ratio=2.5,
+            min_ev_r=settings.min_live_ev_r,
+        )
         self.be_armed      = False
+        self.tp_trailing_active = False
+
+
+@dataclass
+class EntryCandidate:
+    symbol: str
+    state: SymbolState
+    signal: object
+    row: pd.Series
+    params: dict
+    score: float
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +397,13 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
         log.info(f"[{state.symbol}] Zero qty computed — skipping")
         return False
 
+    requested_risk_pct = float(params.get("max_risk_per_trade_pct", plan.risk_pct) or plan.risk_pct)
+    if plan.risk_pct < requested_risk_pct:
+        log.info(
+            f"[{state.symbol}] Risk downsized by portfolio caps: "
+            f"{requested_risk_pct:.2f}% -> {plan.risk_pct:.2f}%"
+        )
+
     try:
         adapter.set_leverage(state.symbol, plan.leverage)
     except Exception as e:
@@ -228,20 +418,56 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
         _tg(f"❌ {state.symbol} entry FAILED: {e}")
         return False
 
-    fill_price = entry.price or row["close"]
+    fill_price = float(entry.price or row["close"])
+    actual_qty = float(plan.qty)
+    try:
+        live = _live_position_snapshot(adapter, state.symbol)
+        if live:
+            if live.get("entry_price"):
+                fill_price = float(live["entry_price"])
+            if live.get("qty"):
+                actual_qty = float(live["qty"])
+    except Exception as e:
+        log.warning(f"[{state.symbol}] Could not confirm live fill from exchange: {e}")
+
+    if not _same_price(fill_price, plan.entry_price, tolerance=0.0005):
+        old_sl, old_tp = plan.stop_loss, plan.take_profit
+        plan.entry_price = fill_price
+        plan.stop_loss, plan.take_profit = _planned_prices(
+            signal.side,
+            fill_price,
+            float(row["atr"]),
+            params,
+        )
+        log.info(
+            f"[{state.symbol}] Repriced SL/TP from actual fill {fill_price:.4f}: "
+            f"SL {old_sl:.4f}->{plan.stop_loss:.4f}, TP {old_tp:.4f}->{plan.take_profit:.4f}"
+        )
 
     try:
-        sl_order = adapter.place_stop_loss(state.symbol, entry_side, plan.qty, plan.stop_loss)
+        sl_order = adapter.place_stop_loss(state.symbol, entry_side, actual_qty, plan.stop_loss)
         state.sl_order_id = sl_order.order_id
     except Exception as e:
         log.error(f"[{state.symbol}] Stop-loss order failed: {e}")
-        _tg(f"⚠️ {state.symbol} SL order FAILED — position open without SL: {e}")
+        _tg(f"⚠️ {state.symbol} SL order FAILED; emergency-closing entry: {e}")
+        try:
+            _reduce_only_market_close(adapter, state.symbol, entry_side, actual_qty)
+            log.error(f"[{state.symbol}] Emergency close sent after SL placement failure")
+        except Exception as close_error:
+            state.open_trade_id = -1
+            log.critical(f"[{state.symbol}] Emergency close FAILED after SL failure: {close_error}")
+            _tg(f"🚨 {state.symbol} emergency close FAILED after SL failure: {close_error}")
+        return False
 
     try:
-        tp_order = adapter.place_take_profit(state.symbol, entry_side, plan.qty, plan.take_profit)
+        tp_order = adapter.place_take_profit(state.symbol, entry_side, actual_qty, plan.take_profit)
         state.tp_order_id = tp_order.order_id
     except Exception as e:
         log.warning(f"[{state.symbol}] Take-profit order failed: {e}")
+
+    actual_risk_amount = abs(float(fill_price) - float(plan.stop_loss)) * float(actual_qty)
+    bankroll = float(params.get("bankroll_usdt") or settings.bankroll_usdt or 0.0)
+    actual_risk_pct = (actual_risk_amount / bankroll * 100) if bankroll > 0 else plan.risk_pct
 
     trade = Trade(
         symbol=state.symbol,
@@ -249,13 +475,28 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
         strategy_name=signal.strategy_name,
         regime=str(signal.indicator_snapshot.get("regime", "unknown")),
         entry_price=fill_price,
-        qty=plan.qty,
+        qty=actual_qty,
         stop_loss=plan.stop_loss,
         take_profit=plan.take_profit,
         leverage=plan.leverage,
     )
     signal.indicator_snapshot["confidence"] = round(signal.confidence, 3)
     signal.indicator_snapshot["trail_mode"] = TrailingStopManager.mode_for(signal.strategy_name, trade.regime)
+    signal.indicator_snapshot["estimated_cost_r"] = round(
+        estimate_round_trip_cost_r(
+            fill_price,
+            plan.stop_loss,
+            plan.take_profit,
+            taker_fee_pct=settings.taker_fee_pct,
+            slippage_pct=settings.slippage_pct,
+        ),
+        3,
+    )
+    signal.indicator_snapshot["planned_risk_pct"] = round(plan.risk_pct, 4)
+    signal.indicator_snapshot["planned_risk_usdt"] = round(plan.risk_amount_usdt, 4)
+    signal.indicator_snapshot["actual_risk_pct"] = round(actual_risk_pct, 4)
+    signal.indicator_snapshot["actual_risk_usdt"] = round(actual_risk_amount, 4)
+    signal.indicator_snapshot["actual_qty"] = round(actual_qty, 8)
     trade.set_entry_reasoning(signal.reasoning)
     trade.set_indicator_snapshot(signal.indicator_snapshot)
     trade.set_params_snapshot(params)
@@ -263,21 +504,21 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
     session.commit()
 
     state.open_trade_id = trade.id
-    risk.mark_position_opened(state.symbol)
-
-    msg = (
-        f"📈 {state.symbol} {signal.side.value.upper()} opened\n"
-        f"Entry: {fill_price:.4f} | SL: {plan.stop_loss:.4f} | TP: {plan.take_profit:.4f}\n"
-        f"Qty: {plan.qty:.4f} | Leverage: {plan.leverage}x\n"
-        f"Reason: {signal.reasoning[0] if signal.reasoning else '-'}"
+    state.tp_trailing_active = False
+    risk.mark_position_opened(
+        state.symbol,
+        side=signal.side.value,
+        risk_pct=actual_risk_pct,
+        risk_amount_usdt=actual_risk_amount,
     )
+
     msg = tg_templates.opened(
         symbol=state.symbol,
         side=signal.side.value,
         entry=fill_price,
         stop=plan.stop_loss,
         take_profit=plan.take_profit,
-        qty=plan.qty,
+        qty=actual_qty,
         leg=signal.strategy_name,
         regime=trade.regime,
         confidence=signal.confidence,
@@ -328,6 +569,7 @@ def _check_close(adapter, session, risk, state) -> bool:
             )
 
     if still_open:
+        trade_params = _trade_params(trade, state)
         try:
             candles = adapter.fetch_ohlcv(state.symbol, "1m", limit=80)
             trail_df = pd.DataFrame([{
@@ -337,13 +579,13 @@ def _check_close(adapter, session, risk, state) -> bool:
             if len(trail_df) >= 30:
                 trail_df = add_indicators(
                     trail_df.sort_values("timestamp").reset_index(drop=True),
-                    state.params,
+                    trade_params,
                 ).dropna()
                 trail = TrailingStopManager(adapter, session, _tg).maybe_update(
                     trade=trade,
                     state=state,
                     df=trail_df,
-                    params=state.params,
+                    params=trade_params,
                 )
                 if trail.moved:
                     state.be_armed = True
@@ -359,6 +601,7 @@ def _check_close(adapter, session, risk, state) -> bool:
                             trail.mode or "trail",
                             trail.reason or "trail update",
                         ))
+                _maybe_activate_trailing_take_profit(adapter, session, state, trade, trail_df, trade_params)
         except Exception as e:
             log.warning(f"[{state.symbol}] trailing stop check failed: {e}")
 
@@ -399,9 +642,9 @@ def _check_close(adapter, session, risk, state) -> bool:
                 log.info(f"[{state.symbol}] Force-closing after {hours_open:.1f}h (max {MAX_TRADE_HOURS}h)")
                 _tg(f"⏰ {state.symbol} force-closed after {hours_open:.0f}h")
                 try:
-                    close_side = "sell" if trade.side == "long" else "buy"
+                    entry_side = "buy" if trade.side == "long" else "sell"
                     close_qty = live_qty if (live_qty is not None and live_qty > 0) else trade.qty
-                    adapter.place_market_order(state.symbol, close_side, close_qty)
+                    adapter.close_position_market(state.symbol, entry_side, close_qty)
                     for oid in [state.sl_order_id, state.tp_order_id]:
                         if oid:
                             try:
@@ -448,7 +691,10 @@ def _check_close(adapter, session, risk, state) -> bool:
 
     direction  = 1 if trade.side == "long" else -1
     raw_pnl    = (exit_price - trade.entry_price) * direction * trade.qty
-    exit_reason = "take_profit" if raw_pnl > 0 else "stop_loss"
+    if raw_pnl > 0 and state.tp_trailing_active:
+        exit_reason = "trailing_take_profit"
+    else:
+        exit_reason = "take_profit" if raw_pnl > 0 else "stop_loss"
     outcome     = "win" if raw_pnl > 0 else ("loss" if raw_pnl < 0 else "breakeven")
 
     trade.exit_price  = exit_price
@@ -527,6 +773,7 @@ def _check_close(adapter, session, risk, state) -> bool:
     state.sl_order_id   = None
     state.tp_order_id   = None
     state.be_armed      = False
+    state.tp_trailing_active = False
     return True
 
 
@@ -555,10 +802,24 @@ def run():
         max_risk_per_trade_pct=settings.max_risk_per_trade_pct,
         max_daily_drawdown_pct=settings.max_daily_drawdown_pct,
         max_concurrent_positions=settings.max_concurrent_positions,
+        max_portfolio_risk_pct=settings.max_portfolio_risk_pct,
+        max_same_direction_risk_pct=settings.max_same_direction_risk_pct,
+        min_entry_risk_pct=settings.min_entry_risk_pct,
+        min_stop_cost_multiple=settings.min_stop_cost_multiple,
+        taker_fee_pct=settings.taker_fee_pct,
+        slippage_pct=settings.slippage_pct,
         default_leverage=settings.default_leverage,
         max_leverage=settings.max_leverage,
     )
     risk   = RiskEngine(exch_settings)
+    bankroll_manager = BankrollManager(settings)
+    risk_profile = bankroll_manager.sync(session, adapter)
+    risk.set_bankroll(risk_profile.effective_bankroll_usdt)
+    log.info(
+        f"Risk profile: bankroll={risk_profile.effective_bankroll_usdt:.2f} "
+        f"risk={risk_profile.risk_pct:.2f}% tier={risk_profile.tier} "
+        f"mode={risk_profile.mode} reason={risk_profile.reason}"
+    )
     roster = CoinRoster(session, adapter)
     states: dict[str, SymbolState] = {s: SymbolState(s) for s in roster.get_active()}
 
@@ -568,7 +829,14 @@ def run():
             states[trade.symbol] = SymbolState(trade.symbol)
         states[trade.symbol].open_trade_id = trade.id
         _recover_protective_order_ids(adapter, states[trade.symbol], trade)
-        risk.mark_position_opened(trade.symbol)
+        params = trade.get_params_snapshot()
+        snapshot = trade.get_indicator_snapshot()
+        risk.mark_position_opened(
+            trade.symbol,
+            side=trade.side,
+            risk_pct=float(snapshot.get("actual_risk_pct") or params.get("max_risk_per_trade_pct") or snapshot.get("planned_risk_pct") or settings.max_risk_per_trade_pct),
+            risk_amount_usdt=float(snapshot.get("actual_risk_usdt") or snapshot.get("planned_risk_usdt") or 0.0),
+        )
         log.info(f"[{trade.symbol}] Recovered open DB trade id={trade.id} on startup")
 
     # Safety net: the DB is not the source of truth for what's actually live on
@@ -590,7 +858,7 @@ def run():
         if sym not in states:
             states[sym] = SymbolState(sym)
         states[sym].open_trade_id = -1  # sentinel: exchange has a position, DB doesn't — block entries
-        risk.mark_position_opened(sym)
+        risk.mark_position_opened(sym, risk_pct=settings.max_risk_per_trade_pct)
         log.error(f"[{sym}] Exchange position with NO matching DB record — blocking new entries until reconciled")
         _tg(f"🚨 {sym} has an open exchange position with no DB record (likely DB reset). Blocking new entries on it — reconcile manually.")
 
@@ -599,6 +867,9 @@ def run():
     candles_since_trade = 0
     last_daily_review = 0      # UTC hour of last daily review
     last_macro_update = 0      # UTC hour of last macro refresh
+    last_bankroll_sync = time.time()
+    last_coin_digest_date = ""  # UTC date string of last coin-digest run
+    digest_utc_hour = (settings.coin_digest_hour_ph - 8) % 24
 
     log.info(f"Roster: {roster.get_active()}")
     _tg(f"🤖 Trading bot started\nSymbols: {', '.join(roster.get_active())}\nMacro: {macro.regime}")
@@ -607,6 +878,19 @@ def run():
         cycle += 1
         now_candle = _candle_close_timestamp(TIMEFRAME)
         now_utc = datetime.now(timezone.utc)
+
+        if time.time() - last_bankroll_sync >= settings.bankroll_sync_interval_sec:
+            try:
+                risk_profile = bankroll_manager.sync(session, adapter)
+                risk.set_bankroll(risk_profile.effective_bankroll_usdt)
+                last_bankroll_sync = time.time()
+                log.info(
+                    f"Risk profile: bankroll={risk_profile.effective_bankroll_usdt:.2f} "
+                    f"risk={risk_profile.risk_pct:.2f}% tier={risk_profile.tier} "
+                    f"drawdown={risk_profile.drawdown_pct:.2f}%"
+                )
+            except Exception as e:
+                log.warning(f"Bankroll/risk sync failed: {e}")
 
         # --- Macro refresh every 4 hours ---
         if now_utc.hour != last_macro_update and now_utc.hour % 4 == 0:
@@ -625,9 +909,25 @@ def run():
             log.info(f"Daily review done. Active: {roster.get_active()}")
             last_daily_review = now_utc.hour
 
+        # --- Daily coin digest: price action + agent's read + news sentiment ---
+        today_str = now_utc.strftime("%Y-%m-%d")
+        if now_utc.hour == digest_utc_hour and last_coin_digest_date != today_str:
+            try:
+                digests = build_all_digests(roster.get_active(), adapter)
+                for result in digests:
+                    save_digest(session, result)
+                if digests:
+                    _tg(tg_templates.coin_digest_report(digests))
+                log.info(f"Coin digest built for {len(digests)} symbol(s)")
+            except Exception as e:
+                log.warning(f"Coin digest run failed: {e}")
+            last_coin_digest_date = today_str
+
         # Track whether this cycle processes a new candle
         new_candle_this_cycle = False
+        opened_this_cycle = False
         signal_summary = []
+        entry_candidates: list[EntryCandidate] = []
 
         for symbol, state in list(states.items()):
             try:
@@ -753,6 +1053,15 @@ def run():
                     except Exception as e:
                         log.warning(f"[{symbol}] Weight apply failed (continuing): {e}")
 
+                    # --- News sentiment (FA) — soft nudge from the daily coin digest ---
+                    try:
+                        fa_delta = apply_sentiment_adjustment(symbol, signal, session)
+                        if fa_delta != 0:
+                            signal.confidence = max(0.0, min(1.0, signal.confidence + fa_delta))
+                            signal.indicator_snapshot["fa_delta"] = round(fa_delta, 2)
+                    except Exception as e:
+                        log.warning(f"[{symbol}] Sentiment apply failed (continuing): {e}")
+
                     # --- Per-coin + macro size adjustment ---
                     trade_params = PerCoinBrain(session, symbol).apply_to_trade_params(state.params)
                     if macro.size_multiplier < 1.0:
@@ -764,12 +1073,69 @@ def run():
                         f"[{symbol}] ✅ ENTRY SIGNAL: {signal.side.value.upper()} "
                         f"confidence={signal.confidence:.2f} macro={macro.regime} — {signal.reasoning[0]}"
                     )
-                    opened = _open_trade(adapter, session, risk, state, signal, row, trade_params)
-                    if opened:
-                        candles_since_trade = 0
-                        signal_summary.append(f"{symbol}: {signal.side.value.upper()} OPENED")
-                    else:
-                        signal_summary.append(f"{symbol}: signal passed but risk engine rejected")
+                    tier_cap = float(risk_profile.risk_pct)
+                    requested_risk = float(trade_params.get("max_risk_per_trade_pct", settings.max_risk_per_trade_pct))
+                    slot_cap = tier_cap
+                    if settings.split_risk_across_slots:
+                        slot_cap = tier_cap / max(1, int(settings.max_concurrent_positions))
+                    portfolio_cap = float(settings.max_portfolio_risk_pct or 0.0) or tier_cap
+                    same_direction_cap = float(settings.max_same_direction_risk_pct or 0.0) or portfolio_cap
+                    trade_params["max_risk_per_trade_pct"] = round(min(requested_risk, slot_cap), 4)
+                    trade_params["max_portfolio_risk_pct"] = round(portfolio_cap, 4)
+                    trade_params["max_same_direction_risk_pct"] = round(same_direction_cap, 4)
+                    trade_params["min_entry_risk_pct"] = settings.min_entry_risk_pct
+                    trade_params["min_stop_cost_multiple"] = settings.min_stop_cost_multiple
+                    trade_params["reentry_max_trades_per_symbol_per_day"] = settings.reentry_max_trades_per_symbol_per_day
+                    trade_params["reentry_min_ev_multiplier"] = settings.reentry_min_ev_multiplier
+                    trade_params["bankroll_usdt"] = risk_profile.effective_bankroll_usdt
+                    signal.indicator_snapshot["risk_tier"] = risk_profile.tier
+                    signal.indicator_snapshot["risk_pct"] = trade_params["max_risk_per_trade_pct"]
+                    signal.indicator_snapshot["portfolio_risk_cap_pct"] = trade_params["max_portfolio_risk_pct"]
+                    signal.indicator_snapshot["same_direction_risk_cap_pct"] = trade_params["max_same_direction_risk_pct"]
+                    signal.indicator_snapshot["effective_bankroll_usdt"] = round(risk_profile.effective_bankroll_usdt, 2)
+                    if trade_params["max_risk_per_trade_pct"] < requested_risk:
+                        log.info(
+                            f"[{symbol}] Risk slot capped size: {requested_risk:.2f}% -> "
+                            f"{trade_params['max_risk_per_trade_pct']:.2f}% "
+                            f"({risk_profile.tier}, {settings.max_concurrent_positions} slots)"
+                        )
+
+                    cost_r, min_required_ev = _cost_context_r(row, signal.side, trade_params)
+                    signal.indicator_snapshot["estimated_cost_r"] = round(cost_r, 3)
+                    signal.indicator_snapshot["min_required_ev_r"] = round(min_required_ev, 3)
+                    if "mtf_ev" in signal.indicator_snapshot:
+                        mtf_ev = float(signal.indicator_snapshot.get("mtf_ev") or 0)
+                        if mtf_ev < min_required_ev:
+                            reason = (
+                                f"EV {mtf_ev:.2f}R below cost-aware floor {min_required_ev:.2f}R "
+                                f"(estimated costs {cost_r:.2f}R)"
+                            )
+                            log.info(f"[{symbol}] {reason} - skipping")
+                            signal_summary.append(f"{symbol}: {reason}")
+                            state.last_candle = now_candle
+                            continue
+
+                    reentry = evaluate_reentry(
+                        session,
+                        symbol,
+                        signal,
+                        trade_params,
+                        now=now_utc,
+                        timeframe_hours=TIMEFRAME_HOURS,
+                    )
+                    if not reentry.allowed:
+                        log.info(f"[{symbol}] Re-entry blocked: {reentry.reason}")
+                        signal_summary.append(f"{symbol}: re-entry blocked ({reentry.reason})")
+                        state.last_candle = now_candle
+                        continue
+
+                    score = _candidate_score(signal)
+                    signal.indicator_snapshot["candidate_score"] = score
+                    entry_candidates.append(EntryCandidate(symbol, state, signal, row, trade_params, score))
+                    signal_summary.append(
+                        f"{symbol}: candidate {signal.side.value.upper()} "
+                        f"score={score:.2f} EV={float(signal.indicator_snapshot.get('mtf_ev') or 0):.2f}R"
+                    )
                 else:
                     reason = signal.reasoning[0] if signal.reasoning else "no signal"
                     log.info(f"[{symbol}] No signal — {reason}")
@@ -787,12 +1153,45 @@ def run():
                     log.error(f"[{symbol}] Unhandled error in main loop: {e}", exc_info=True)
                     _tg(f"⚠️ [{symbol}] Loop error: {e}")
 
+        # --- Ranked admission: best setups get the limited risk slots first ---
+        if entry_candidates:
+            entry_candidates.sort(key=lambda c: c.score, reverse=True)
+            ranked = ", ".join(f"{c.symbol}:{c.score:.2f}" for c in entry_candidates[:5])
+            log.info(f"Ranked entry candidates: {ranked}")
+            for candidate in entry_candidates:
+                if candidate.state.open_trade_id is not None:
+                    continue
+                opened = _open_trade(
+                    adapter,
+                    session,
+                    risk,
+                    candidate.state,
+                    candidate.signal,
+                    candidate.row,
+                    candidate.params,
+                )
+                if opened:
+                    opened_this_cycle = True
+                    signal_summary.append(
+                        f"{candidate.symbol}: {candidate.signal.side.value.upper()} OPENED "
+                        f"(ranked score={candidate.score:.2f})"
+                    )
+                else:
+                    signal_summary.append(
+                        f"{candidate.symbol}: ranked candidate rejected by risk/admission caps"
+                    )
+
         # --- Self-awareness: candle summary ---
         if new_candle_this_cycle:
-            candles_since_trade += 1
+            if opened_this_cycle:
+                candles_since_trade = 0
+            else:
+                candles_since_trade += 1
+            open_position_count = sum(1 for st in states.values() if st.open_trade_id is not None)
             log.info(
-                f"📊 Candle summary (idle {candles_since_trade}h) | macro={macro.regime} "
-                f"size={macro.size_multiplier:.2f} | {len(signal_summary)} symbols evaluated"
+                f"📊 Candle summary (no_new_entries {candles_since_trade}h, open={open_position_count}) "
+                f"| macro={macro.regime} size={macro.size_multiplier:.2f} "
+                f"| {len(signal_summary)} notes"
             )
             for s in signal_summary:
                 log.info(f"  → {s}")
@@ -801,11 +1200,12 @@ def run():
             if candles_since_trade > 0 and candles_since_trade % 24 == 0:
                 idle_days = candles_since_trade / 24
                 log.warning(
-                    f"🔍 SELF-CHECK: No trades for {idle_days:.0f} day(s). "
+                    f"🔍 SELF-CHECK: No new entries for {idle_days:.0f} day(s). "
                     f"Macro={macro.regime} FG={macro.fear_greed} Funding={macro.funding_rate_pct:+.1f}%"
                 )
                 _tg(
-                    f"🔍 Self-check: no trades for {idle_days:.0f} day(s)\n"
+                    f"🔍 Self-check: no new entries for {idle_days:.0f} day(s)\n"
+                    f"Open positions: {open_position_count}\n"
                     f"Macro: {macro.regime} | F&G: {macro.fear_greed} | Funding: {macro.funding_rate_pct:+.1f}%\n"
                     f"Most common block: check journalctl for signal summaries"
                 )

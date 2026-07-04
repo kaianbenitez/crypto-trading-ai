@@ -25,12 +25,48 @@ class Settings:
     telegram_allowed_user_ids: str = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")
 
     bankroll_usdt: float = float(os.getenv("BANKROLL_USDT", "1000"))
+    bankroll_mode: str = os.getenv("BANKROLL_MODE", "static").lower()  # static | equity
+    bankroll_compounding: bool = os.getenv("BANKROLL_COMPOUNDING", "false").lower() == "true"
+    bankroll_min_usdt: float = float(os.getenv("BANKROLL_MIN_USDT", "50"))
+    bankroll_max_usdt: float = float(os.getenv("BANKROLL_MAX_USDT", "0"))  # 0 = no explicit cap
+    bankroll_sync_interval_sec: int = int(os.getenv("BANKROLL_SYNC_INTERVAL_SEC", "900"))
 
     max_risk_per_trade_pct: float = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "1.5"))
-    max_daily_drawdown_pct: float = float(os.getenv("MAX_DAILY_DRAWDOWN_PCT", "5"))
-    max_concurrent_positions: int = int(os.getenv("MAX_CONCURRENT_POSITIONS", "1"))
+    max_daily_drawdown_pct: float = float(os.getenv("MAX_DAILY_DRAWDOWN_PCT", "3"))
+    max_concurrent_positions: int = int(os.getenv("MAX_CONCURRENT_POSITIONS", "2"))
+    split_risk_across_slots: bool = os.getenv("SPLIT_RISK_ACROSS_SLOTS", "true").lower() == "true"
+    max_portfolio_risk_pct: float = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "1.5"))  # 0 = use active risk tier
+    max_same_direction_risk_pct: float = float(os.getenv("MAX_SAME_DIRECTION_RISK_PCT", "1.5"))  # 0 = portfolio cap
+    min_entry_risk_pct: float = float(os.getenv("MIN_ENTRY_RISK_PCT", "0.25"))
+    min_stop_cost_multiple: float = float(os.getenv("MIN_STOP_COST_MULTIPLE", "5"))
     default_leverage: int = int(os.getenv("DEFAULT_LEVERAGE", "3"))
     max_leverage: int = int(os.getenv("MAX_LEVERAGE", "5"))
+
+    taker_fee_pct: float = float(os.getenv("TAKER_FEE_PCT", "0.05"))
+    slippage_pct: float = float(os.getenv("SLIPPAGE_PCT", "0.03"))
+    min_live_ev_r: float = float(os.getenv("MIN_LIVE_EV_R", "0.25"))
+    min_edge_after_cost_r: float = float(os.getenv("MIN_EDGE_AFTER_COST_R", "0.15"))
+
+    risk_tier_mode: str = os.getenv("RISK_TIER_MODE", "auto").lower()  # auto | fixed
+    risk_base_pct: float = float(os.getenv("RISK_BASE_PCT", "1.0"))
+    risk_recovery_pct: float = float(os.getenv("RISK_RECOVERY_PCT", "0.75"))
+    risk_drawdown_pct: float = float(os.getenv("RISK_DRAWDOWN_PCT", "0.5"))
+    risk_proven_pct: float = float(os.getenv("RISK_PROVEN_PCT", "1.5"))
+    risk_recovery_drawdown_pct: float = float(os.getenv("RISK_RECOVERY_DRAWDOWN_PCT", "2.0"))
+    risk_drawdown_trigger_pct: float = float(os.getenv("RISK_DRAWDOWN_TRIGGER_PCT", "5.0"))
+    risk_proven_min_trades: int = int(os.getenv("RISK_PROVEN_MIN_TRADES", "50"))
+    risk_proven_min_expectancy_r: float = float(os.getenv("RISK_PROVEN_MIN_EXPECTANCY_R", "0.15"))
+    risk_proven_min_profit_factor: float = float(os.getenv("RISK_PROVEN_MIN_PROFIT_FACTOR", "1.3"))
+    risk_proven_max_drawdown_pct: float = float(os.getenv("RISK_PROVEN_MAX_DRAWDOWN_PCT", "8.0"))
+    risk_proven_min_symbols: int = int(os.getenv("RISK_PROVEN_MIN_SYMBOLS", "3"))
+
+    reentry_max_trades_per_symbol_per_day: int = int(os.getenv("REENTRY_MAX_TRADES_PER_SYMBOL_PER_DAY", "3"))
+    reentry_min_ev_multiplier: float = float(os.getenv("REENTRY_MIN_EV_MULTIPLIER", "1.5"))
+
+    # Free-tier news sentiment for the daily coin digest (optional; digest just
+    # skips the news section if no key is set). No LLM calls — keyword-scored.
+    cryptopanic_api_key: str = os.getenv("CRYPTOPANIC_API_KEY", "")
+    coin_digest_hour_ph: int = int(os.getenv("COIN_DIGEST_HOUR_PH", "7"))
 
 
 settings = Settings()

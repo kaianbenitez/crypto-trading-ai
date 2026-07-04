@@ -44,6 +44,16 @@ class CoinRoster:
         self.adapter  = adapter
         self._load()
 
+    def _fill_candidate_slots(self) -> bool:
+        changed = False
+        for symbol in CANDIDATE_SYMBOLS:
+            if len(self.active) >= MAX_ACTIVE:
+                break
+            if symbol not in self.active and symbol not in self.benched:
+                self.active.append(symbol)
+                changed = True
+        return changed
+
     def _load(self):
         """Load roster state from DB."""
         from agent.db.models import RosterState
@@ -52,9 +62,11 @@ class CoinRoster:
             self.active  = json.loads(record.active_symbols)
             self.benched = json.loads(record.benched_symbols)  # {symbol: bench_until_iso}
             self.last_review = record.last_review
+            if self._fill_candidate_slots():
+                self._save()
         else:
-            # Bootstrap: start with Tier 1
-            self.active  = ["ETH/USDT", "XRP/USDT", "SOL/USDT", "ADA/USDT", "BTC/USDT"]
+            # Bootstrap: keep the full configured candidate roster active.
+            self.active  = CANDIDATE_SYMBOLS[:MAX_ACTIVE]
             self.benched = {}
             self.last_review = None
             self._save()

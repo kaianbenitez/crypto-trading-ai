@@ -37,7 +37,7 @@ TF_WEIGHTS = {
     "1w":  0.15,
 }
 
-MIN_EV_R = 0.05
+MIN_EV_R = 0.25
 
 
 def score_single_tf(df: pd.DataFrame, params: dict) -> dict:
@@ -234,13 +234,14 @@ def compute_confluence(
     ev           = None
     approved     = False
     block_reason = None
+    min_ev_r = float(params.get("min_ev_r", MIN_EV_R))
 
     if signal_side == "long":
         ev = ev_long
         if overall_bias == "bearish":
             block_reason = f"MTF bias is BEARISH (score {weighted_score:.1f}) — blocks long signal"
-        elif ev < MIN_EV_R:
-            block_reason = f"EV {ev:.2f}R below minimum {MIN_EV_R}R — poor risk/reward"
+        elif ev < min_ev_r:
+            block_reason = f"EV {ev:.2f}R below minimum {min_ev_r:.2f}R — poor risk/reward"
         else:
             approved = True
 
@@ -248,8 +249,8 @@ def compute_confluence(
         ev = ev_short
         if overall_bias == "bullish":
             block_reason = f"MTF bias is BULLISH (score {weighted_score:.1f}) — blocks short signal"
-        elif ev < MIN_EV_R:
-            block_reason = f"EV {ev:.2f}R below minimum {MIN_EV_R}R — poor risk/reward"
+        elif ev < min_ev_r:
+            block_reason = f"EV {ev:.2f}R below minimum {min_ev_r:.2f}R — poor risk/reward"
         else:
             approved = True
 
