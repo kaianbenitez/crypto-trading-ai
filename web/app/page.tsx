@@ -2,50 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentStatus, api, CandlePayload, CoinDigest, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
+import { money, pct, pnlColor, price4 } from "@/lib/format";
 import AuthGate from "./components/AuthGate";
+import Sidebar from "./components/Sidebar";
+import CoinLogo from "./components/CoinLogo";
+import CoinDigestCard from "./components/CoinDigestCard";
 
-// ── formatters ─────────────────────────────────────────────────────────────
-const money  = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const price4 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-const pct    = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
-
-// ── coin logo ───────────────────────────────────────────────────────────────
-function coinSlug(symbol: string) {
-  const base = symbol.replace("/USDT", "").replace("/USD", "").toLowerCase();
-  return base === "pol" ? "matic" : base;
+// TradingView chart link for a symbol, opened in a new tab from the coin logo/name.
+function tradingViewUrl(symbol: string) {
+  const base = symbol.split("/")[0].toUpperCase();
+  return `https://www.tradingview.com/chart/?symbol=BINANCE%3A${base}USDT.P`;
 }
-function CoinLogo({ symbol, size = 28 }: { symbol: string; size?: number }) {
-  const slug = coinSlug(symbol);
-  const [err, setErr] = useState(false);
-  if (err) {
-    return (
-      <span
-        style={{ width: size, height: size, fontSize: size * 0.45, background: "var(--surface3)", border: "1px solid var(--border2)", borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--muted)", fontWeight: 600, flexShrink: 0 }}
-      >
-        {slug.slice(0, 2).toUpperCase()}
-      </span>
-    );
-  }
-  return (
-    <img
-      src={`https://cdn.jsdelivr.net/gh/spothq/cryptocurrency-icons@master/32/color/${slug}.png`}
-      alt={slug}
-      width={size}
-      height={size}
-      onError={() => setErr(true)}
-      style={{ borderRadius: "50%", flexShrink: 0, objectFit: "contain" }}
-    />
-  );
-}
-
-// ── helpers ─────────────────────────────────────────────────────────────────
-function serviceText(v?: string) { return !v ? "—" : v === "active" ? "Online" : v === "inactive" ? "Offline" : v; }
-function serviceColor(v?: string) {
-  if (v === "active")   return "var(--green)";
-  if (v === "inactive" || v === "failed") return "var(--red)";
-  return "var(--muted)";
-}
-function pnlColor(v: number) { return v > 0 ? "var(--green)" : v < 0 ? "var(--red)" : "var(--text)"; }
 
 const REGIME_META: Record<string, { label: string; color: string }> = {
   extreme_fear:  { label: "Extreme Fear",    color: "var(--red)"   },
@@ -77,19 +44,6 @@ function Badge({ children, color, bg }: { children: React.ReactNode; color?: str
     <span style={{ color: c, background: bg || c + "18", border: `1px solid ${c}30`, borderRadius: 20, padding: "2px 8px", fontSize: 11, fontWeight: 600, letterSpacing: "0.03em", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
       {children}
     </span>
-  );
-}
-
-function Dot({ state }: { state?: string }) {
-  const color = serviceColor(state);
-  const active = state === "active";
-  return (
-    <span
-      className={active ? "pulse-dot" : ""}
-      style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }}
-      role="img"
-      aria-label={serviceText(state)}
-    />
   );
 }
 
@@ -194,16 +148,28 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
   const openPnl = live?.unrealized_pnl ?? unrealizedPnl(trade, currentPrice);
   const openPct = live?.roi_pct ?? unrealizedPct(trade, currentPrice);
   const note = detail.reasoning.thesis[0];
+  const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
+  const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
+    ? snapshot.actual_risk_usdt
+    : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
 
   return (
     <div style={{ background: "var(--surface)", border: `1px solid ${sideColor}24`, borderRadius: 10, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <CoinLogo symbol={trade.symbol} size={26} />
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>{trade.symbol}</div>
-            <div style={{ color: "var(--muted)", fontSize: 11 }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
-          </div>
+          <a
+            href={tradingViewUrl(trade.symbol)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open ${trade.symbol} chart on TradingView`}
+            style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit" }}
+          >
+            <CoinLogo symbol={trade.symbol} size={26} />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{trade.symbol}</div>
+              <div style={{ color: "var(--muted)", fontSize: 11 }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
+            </div>
+          </a>
           <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
         </div>
         <span style={{ color: "var(--muted)", fontSize: 11 }}>
@@ -232,11 +198,12 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
 
         <PnlBar trade={trade} currentPrice={currentPrice} tall />
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: note ? 10 : 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginBottom: note ? 10 : 0 }}>
           {[
             ["Safety stop", price4.format(trade.stop_loss), "var(--red)"],
             ["Entry", price4.format(trade.entry_price), "var(--accent)"],
             ["Target", price4.format(trade.take_profit), "var(--green)"],
+            ["Risked", `$${money.format(riskedAmt)}`, "var(--muted)"],
           ].map(([label, value, color]) => (
             <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 9px" }}>
               <div style={{ color: color as string, fontSize: 11, fontWeight: 700 }}>{label}</div>
@@ -246,8 +213,13 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
         </div>
 
         {note && (
-          <div style={{ color: "var(--muted)", fontSize: 11.5, lineHeight: 1.45, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-            {note}
+          <div style={{ paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+            <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
+              Why the agent opened this trade
+            </div>
+            <div style={{ color: "var(--text)", fontSize: 11.5, lineHeight: 1.45 }}>
+              {note}
+            </div>
           </div>
         )}
       </div>
@@ -257,19 +229,29 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
 
 function OpenPosition({ trade }: { trade: Trade }) {
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
+  const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
+  const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
+    ? snapshot.actual_risk_usdt
+    : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
   return (
     <div style={{ background: "var(--surface)", border: `1px solid ${sideColor}22`, borderRadius: 14, padding: "16px 20px", position: "relative", overflow: "hidden" }}>
       <span style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: 3, background: sideColor, borderRadius: "14px 0 0 14px" }} />
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <a
+          href={tradingViewUrl(trade.symbol)}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Open ${trade.symbol} chart on TradingView`}
+          style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit" }}
+        >
           <CoinLogo symbol={trade.symbol} size={30} />
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{trade.symbol.replace("/USDT", "")}<span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>/USDT</span></div>
             <div style={{ color: "var(--muted)", fontSize: 11 }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
           </div>
-          <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
-        </div>
+        </a>
+        <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
         <Badge color="var(--amber)">OPEN</Badge>
       </div>
 
@@ -281,10 +263,11 @@ function OpenPosition({ trade }: { trade: Trade }) {
         <span>TP {price4.format(trade.take_profit)}</span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
         {[
           { label: "Leverage", value: `${trade.leverage}×` },
           { label: "Qty", value: trade.qty ? price4.format(trade.qty) : "—" },
+          { label: "Risked", value: `$${money.format(riskedAmt)}` },
           { label: "Opened", value: new Date(trade.opened_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
         ].map(({ label, value }) => (
           <div key={label} style={{ background: "var(--surface2)", borderRadius: 8, padding: "8px 10px" }}>
@@ -295,8 +278,13 @@ function OpenPosition({ trade }: { trade: Trade }) {
       </div>
 
       {trade.entry_reasoning[0] && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>
-          {trade.entry_reasoning[0]}
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+          <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
+            Why the agent opened this trade
+          </div>
+          <div style={{ color: "var(--text)", fontSize: 11, lineHeight: 1.5 }}>
+            {trade.entry_reasoning[0]}
+          </div>
         </div>
       )}
     </div>
@@ -308,6 +296,10 @@ function TradeRow({ trade }: { trade: Trade }) {
   const pnl = trade.pnl_usdt ?? 0;
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   const pnlPct = trade.exit_price !== null ? unrealizedPct(trade, trade.exit_price) : undefined;
+  const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
+  const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
+    ? snapshot.actual_risk_usdt
+    : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
   return (
     <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -330,6 +322,9 @@ function TradeRow({ trade }: { trade: Trade }) {
           {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "—"}
         </span>
       </div>
+      <div style={{ color: "var(--muted)", fontSize: 10.5 }}>
+        Risked ${money.format(riskedAmt)}
+      </div>
       <div style={{ color: "var(--muted)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {trade.exit_reason || trade.entry_reasoning[0] || "—"}
       </div>
@@ -337,57 +332,6 @@ function TradeRow({ trade }: { trade: Trade }) {
   );
 }
 
-// ── coin digest card (daily price action + agent read + news sentiment) ─────
-const SENTIMENT_META: Record<string, { icon: string; color: string }> = {
-  positive: { icon: "🙂", color: "var(--green)" },
-  negative: { icon: "🙁", color: "var(--red)" },
-  neutral:  { icon: "😐", color: "var(--muted)" },
-  "no data": { icon: "🤷", color: "var(--muted)" },
-};
-
-function CoinDigestCard({ digest }: { digest: CoinDigest }) {
-  const coin = digest.symbol.replace("/USDT", "");
-  const sentiment = SENTIMENT_META[digest.sentiment_label || "no data"] ?? SENTIMENT_META["no data"];
-  const change = digest.price_change_pct_24h;
-  const watching = digest.watching_side && digest.watch_low !== null && digest.watch_high !== null;
-
-  return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <CoinLogo symbol={digest.symbol} size={22} />
-        <span style={{ fontWeight: 700, fontSize: 13 }}>{coin}</span>
-        {change !== null && (
-          <span style={{ color: pnlColor(change), fontSize: 12, fontWeight: 600, marginLeft: "auto" }}>{pct(change)}</span>
-        )}
-      </div>
-
-      {digest.price_low_24h !== null && digest.price_high_24h !== null && (
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>
-          24h range: {price4.format(digest.price_low_24h)} – {price4.format(digest.price_high_24h)}
-        </div>
-      )}
-
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span title={digest.sentiment_label ?? "no data"} style={{ fontSize: 13 }}>{sentiment.icon}</span>
-        <span style={{ color: sentiment.color, fontSize: 11, fontWeight: 600 }}>
-          News: {digest.sentiment_label === "no data" ? "not tracked" : digest.sentiment_label}
-        </span>
-      </div>
-
-      {watching ? (
-        <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
-          👀 Watching for a <b style={{ color: digest.watching_side === "long" ? "var(--green)" : "var(--red)" }}>{digest.watching_side?.toUpperCase()}</b> near {price4.format(digest.watch_low!)}–{price4.format(digest.watch_high!)}
-        </div>
-      ) : (
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>No active setup — just watching.</div>
-      )}
-
-      <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4, paddingTop: 6, borderTop: "1px solid var(--border)" }}>
-        {digest.summary}
-      </div>
-    </div>
-  );
-}
 
 // ── card shell ───────────────────────────────────────────────────────────────
 function Card({ title, right, children, noPad }: { title: string; right?: React.ReactNode; children: React.ReactNode; noPad?: boolean }) {
@@ -399,108 +343,6 @@ function Card({ title, right, children, noPad }: { title: string; right?: React.
       </div>
       <div style={noPad ? {} : { padding: "0 20px" }}>{children}</div>
     </div>
-  );
-}
-
-// ── agent status pill + dropdown ────────────────────────────────────────────
-// Services whose value is a systemctl state ("active"/"inactive"/"failed") —
-// used to compute the overall health icon.
-const SERVICE_LIST: { name: string; key: keyof AgentStatus }[] = [
-  { name: "Trading Agent", key: "trading_agent" },
-  { name: "API Backend",   key: "webapi" },
-  { name: "Dashboard",     key: "dashboard" },
-  { name: "Nginx",         key: "nginx" },
-];
-
-function AgentStatusPill({ status }: { status?: AgentStatus | null }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
-
-  const states = SERVICE_LIST.map(s => status?.[s.key] as string | undefined);
-  const known = states.filter(Boolean);
-  const allOk = known.length === SERVICE_LIST.length && known.every(s => s === "active");
-  const anyDown = states.some(s => s === "inactive" || s === "failed");
-
-  const icon = !status ? "…" : anyDown ? "!" : allOk ? "✓" : "…";
-  const color = !status ? "var(--muted)" : anyDown ? "var(--amber)" : allOk ? "var(--green)" : "var(--muted)";
-  const label = !status ? "Checking…" : anyDown ? "Needs attention" : allOk ? "Agent live" : "Checking…";
-
-  return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        aria-label="Service status"
-        style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface2)", border: `1px solid ${color}30`, borderRadius: 20, padding: "4px 10px", cursor: "pointer" }}
-      >
-        <span style={{ width: 15, height: 15, borderRadius: "50%", background: color + "22", color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{icon}</span>
-        <span style={{ fontSize: 11, fontWeight: 600, color }}>{label}</span>
-        <span style={{ fontSize: 9, color: "var(--muted)" }}>{open ? "▲" : "▼"}</span>
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 6, minWidth: 190, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
-          {SERVICE_LIST.map((s, i) => {
-            const state = states[i];
-            return (
-              <div key={s.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 6px", gap: 12 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <Dot state={state} />
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>{s.name}</span>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 600, color: serviceColor(state) }}>{serviceText(state)}</span>
-              </div>
-            );
-          })}
-          {status?.exchange && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 6px", gap: 12, marginTop: 2, borderTop: "1px solid var(--border)" }}>
-              <span style={{ fontSize: 12, color: "var(--muted)" }}>Exchange</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{status.exchange}{status.testnet ? " (testnet)" : ""}</span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── nav bar ──────────────────────────────────────────────────────────────────
-function NavBar({ killActive, status }: { killActive?: boolean; status?: AgentStatus | null }) {
-  return (
-    <nav style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "0 24px", height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 50, backdropFilter: "blur(8px)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 20, height: 20, background: "linear-gradient(135deg, var(--accent), var(--accent2))", borderRadius: 5, display: "inline-block", flexShrink: 0 }} />
-          <span style={{ fontWeight: 700, fontSize: 14, letterSpacing: "-0.01em" }}>TradingAI</span>
-        </div>
-        {[
-          { label: "Dashboard", href: "/" },
-          { label: "Journal",   href: "/journal" },
-        ].map(({ label, href }) => (
-          <a key={href} href={href} style={{ color: "var(--muted)", fontSize: 13, textDecoration: "none", transition: "color 0.15s" }}
-             onMouseEnter={e => (e.currentTarget.style.color = "var(--text)")}
-             onMouseLeave={e => (e.currentTarget.style.color = "var(--muted)")}
-          >{label}</a>
-        ))}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <AgentStatusPill status={status} />
-        {/* Testnet badge */}
-        {status?.testnet && (
-          <Badge color="var(--amber)">TESTNET</Badge>
-        )}
-        {/* Kill switch status */}
-        {killActive && (
-          <Badge color="var(--red)">HALTED</Badge>
-        )}
-      </div>
-    </nav>
   );
 }
 
@@ -636,8 +478,9 @@ function Dashboard() {
   const totalPnl     = closedTrades.reduce((sum, t) => sum + (t.pnl_usdt ?? 0), 0);
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)" }}>
-      <NavBar killActive={killActive} status={status} />
+    <div style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex" }}>
+      <Sidebar />
+      <div style={{ flex: 1, minWidth: 0 }}>
 
       {/* HALTED banner */}
       {killActive && (
@@ -652,7 +495,10 @@ function Dashboard() {
         {/* Header row */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
           <div>
-            <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Dashboard</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Dashboard</h1>
+              {killActive && <Badge color="var(--red)">HALTED</Badge>}
+            </div>
             <p style={{ color: "var(--muted)", fontSize: 12, margin: "4px 0 0" }}>
               {loading ? "Connecting…" : `Updated ${lastChecked}`}
             </p>
@@ -751,6 +597,7 @@ function Dashboard() {
         </div>
 
       </main>
+      </div>
     </div>
   );
 }

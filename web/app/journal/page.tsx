@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AuthGate from "../components/AuthGate";
-import NavBar from "../components/NavBar";
+import Sidebar from "../components/Sidebar";
 import { api, Trade } from "@/lib/api";
 
 const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -55,12 +55,17 @@ function TradeRow({ trade }: { trade: Trade }) {
 
       {open && (
         <div style={{ background: "var(--surface2)", borderTop: "1px solid var(--border)", padding: 16 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: 10, marginBottom: 14 }} className="journal-detail-grid">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(120px, 1fr))", gap: 10, marginBottom: 14 }} className="journal-detail-grid">
             {[
               ["Entry", price.format(trade.entry_price)],
               ["Exit", trade.exit_price == null ? "-" : price.format(trade.exit_price)],
               ["SL", price.format(trade.stop_loss)],
               ["TP", price.format(trade.take_profit)],
+              ["Risked", `$${money.format(
+                typeof (trade.indicator_snapshot as Record<string, unknown>)?.actual_risk_usdt === "number"
+                  ? (trade.indicator_snapshot as Record<string, number>).actual_risk_usdt
+                  : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty
+              )}`],
             ].map(([label, value]) => (
               <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "9px 10px", background: "var(--surface)" }}>
                 <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 3 }}>{label}</div>
@@ -113,9 +118,9 @@ function JournalContent() {
   }, [trades]);
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)" }}>
-      <NavBar />
-      <main style={{ maxWidth: 1560, margin: "0 auto", padding: "28px 28px 60px" }}>
+    <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
+      <Sidebar />
+      <main style={{ flex: 1, minWidth: 0, maxWidth: 1560, margin: "0 auto", padding: "28px 28px 60px" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 18 }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Trade Journal</h1>
