@@ -179,9 +179,9 @@ def morning_brief(session: Session) -> str:
     state = get_or_create_state(session)
     kill_icon = "🔴" if state.kill_switch_active else "🟢"
     lines = [
-        "🌅 Morning brief",
-        _now_manila().strftime("%d %b %Y, 08:00 PH"),
-        f"💰 Overnight/today P&L: {_fmt_money(pnl)} from {len(yesterday)} closed trade(s)",
+        "📋 Shift-start brief",
+        _now_manila().strftime("%d %b %Y, %H:%M PH"),
+        f"💰 P&L since last brief: {_fmt_money(pnl)} from {len(yesterday)} closed trade(s)",
         f"📊 Open positions: {len(opens)}",
         f"{kill_icon} Kill switch: {'ON' if state.kill_switch_active else 'OFF'}",
     ]

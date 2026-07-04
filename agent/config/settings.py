@@ -66,7 +66,7 @@ class Settings:
     # Free-tier news sentiment for the daily coin digest (optional; digest just
     # skips the news section if no key is set). No LLM calls — keyword-scored.
     cryptopanic_api_key: str = os.getenv("CRYPTOPANIC_API_KEY", "")
-    coin_digest_hour_ph: int = int(os.getenv("COIN_DIGEST_HOUR_PH", "7"))
+    coin_digest_hour_ph: int = int(os.getenv("COIN_DIGEST_HOUR_PH", "21"))  # 9 PM PHT ≈ start of a 9-5 Eastern workday
 
 
 settings = Settings()

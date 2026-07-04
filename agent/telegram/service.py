@@ -204,11 +204,14 @@ class TelegramService:
                 self.send(f"⚠️ Command failed: {exc}")
 
     def scheduled_reports(self, session) -> None:
+        # Scheduled around a 9AM-5PM Eastern workday (roughly 9-10PM to 5-6AM
+        # PHT), not literal PH morning/evening — shift these if your actual
+        # awake window changes.
         now = datetime.now(MANILA)
         jobs = [
-            ("morning", now.strftime("%Y-%m-%d"), now.hour == 8 and now.minute < 5, morning_brief),
-            ("eod", now.strftime("%Y-%m-%d"), now.hour == 23 and now.minute >= 55, eod_recap),
-            ("weekly", now.strftime("%G-W%V"), now.weekday() == 6 and now.hour == 20 and now.minute < 5, weekly_report),
+            ("morning", now.strftime("%Y-%m-%d"), now.hour == 21 and now.minute < 5, morning_brief),
+            ("eod", now.strftime("%Y-%m-%d"), now.hour == 5 and now.minute >= 55, eod_recap),
+            ("weekly", now.strftime("%G-W%V"), now.weekday() == 6 and now.hour == 21 and now.minute < 5, weekly_report),
         ]
         for name, key, due, builder in jobs:
             state_key = f"sent:{name}:{key}"
