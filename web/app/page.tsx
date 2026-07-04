@@ -403,12 +403,13 @@ function Card({ title, right, children, noPad }: { title: string; right?: React.
 }
 
 // ── agent status pill + dropdown ────────────────────────────────────────────
+// Services whose value is a systemctl state ("active"/"inactive"/"failed") —
+// used to compute the overall health icon.
 const SERVICE_LIST: { name: string; key: keyof AgentStatus }[] = [
   { name: "Trading Agent", key: "trading_agent" },
   { name: "API Backend",   key: "webapi" },
   { name: "Dashboard",     key: "dashboard" },
   { name: "Nginx",         key: "nginx" },
-  { name: "Exchange",      key: "exchange" },
 ];
 
 function AgentStatusPill({ status }: { status?: AgentStatus | null }) {
@@ -425,7 +426,7 @@ function AgentStatusPill({ status }: { status?: AgentStatus | null }) {
 
   const states = SERVICE_LIST.map(s => status?.[s.key] as string | undefined);
   const known = states.filter(Boolean);
-  const allOk = known.length > 0 && known.every(s => s === "active");
+  const allOk = known.length === SERVICE_LIST.length && known.every(s => s === "active");
   const anyDown = states.some(s => s === "inactive" || s === "failed");
 
   const icon = !status ? "…" : anyDown ? "!" : allOk ? "✓" : "…";
@@ -457,6 +458,12 @@ function AgentStatusPill({ status }: { status?: AgentStatus | null }) {
               </div>
             );
           })}
+          {status?.exchange && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 6px", gap: 12, marginTop: 2, borderTop: "1px solid var(--border)" }}>
+              <span style={{ fontSize: 12, color: "var(--muted)" }}>Exchange</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{status.exchange}{status.testnet ? " (testnet)" : ""}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
