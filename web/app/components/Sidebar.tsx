@@ -33,13 +33,13 @@ const SERVICE_LIST: { name: string; key: keyof AgentStatus }[] = [
   { name: "Nginx",         key: "nginx" },
 ];
 
-// Suggested nav sections beyond what's wired up today:
-//   Risk      — bankroll tier / drawdown / proven-live readiness (currently TG-only via /risk)
-//   Adaptive  — per-coin brain state + adaptive activity log (API exists: /api/coin-brains, /api/adaptive-activity)
 const NAV_ITEMS = [
   { label: "Dashboard",  href: "/" },
   { label: "Journal",    href: "/journal" },
   { label: "Coin Watch", href: "/coins" },
+  { label: "Risk",       href: "/risk" },
+  { label: "Adaptive",   href: "/adaptive" },
+  { label: "Settings",   href: "/settings" },
 ];
 
 export default function Sidebar() {

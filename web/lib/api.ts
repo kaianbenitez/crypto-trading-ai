@@ -130,6 +130,85 @@ export interface CoinDigest {
   created_at: string;
 }
 
+export interface RiskStatus {
+  effective_bankroll_usdt: number;
+  configured_bankroll_usdt: number;
+  account_equity_usdt: number | null;
+  risk_pct: number;
+  tier: string;
+  mode: string;
+  drawdown_pct: number;
+  reason: string;
+  created_at: string | null;
+}
+
+export interface PerformanceMetrics {
+  days: number;
+  bankroll_usdt: number;
+  trade_count: number;
+  closed_count: number;
+  open_count: number;
+  total_pnl_usdt: number;
+  roi_pct: number;
+  win_rate_pct: number;
+  expectancy_r: number;
+  profit_factor: number;
+  max_drawdown_pct: number;
+  max_consecutive_losses: number;
+  distinct_symbols: number;
+  reentry_count: number;
+  reentry_pnl_usdt: number;
+  reentry_expectancy_r: number;
+  avg_estimated_cost_r: number;
+  high_cost_trade_count: number;
+  runner_count: number;
+  runner_pnl_usdt: number;
+  by_symbol: Record<string, { pnl: number; avg_r: number; win_rate_pct: number }>;
+  by_strategy: Record<string, { pnl: number; avg_r: number; win_rate_pct: number }>;
+}
+
+export interface Readiness {
+  ready: boolean;
+  checks: Record<string, boolean>;
+  failed: string[];
+}
+
+export interface Validation {
+  risk: {
+    effective_bankroll_usdt: number;
+    risk_pct: number;
+    tier: string;
+    mode: string;
+    reason: string;
+  };
+  metrics: PerformanceMetrics;
+  readiness: Readiness;
+}
+
+export interface CoinBrain {
+  symbol: string;
+  params: Record<string, unknown>;
+  leg_stats: Record<string, unknown>;
+  regime_stats: Record<string, unknown>;
+  disabled_legs: string[];
+  version: number;
+  updated_at: string;
+}
+
+export interface AdaptiveActivityEntry {
+  type: "param_change" | "trail_move";
+  symbol: string;
+  message: string;
+  created_at: string;
+  payload: Record<string, unknown>;
+}
+
+export interface RosterInfo {
+  active: string[];
+  benched: { symbol: string; until: string }[];
+  last_review: string | null;
+}
+
 export interface AgentStatus {
   trading_agent: string;
   webapi: string;
@@ -155,6 +234,11 @@ export const api = {
   openPositionDetails: () => request<OpenPositionDetail[]>("/api/open-positions-detail"),
   livePositions: () => request<LivePosition[]>("/api/live-positions"),
   coinDigests: () => request<CoinDigest[]>("/api/coin-digests"),
+  riskStatus: () => request<RiskStatus>("/api/risk-status"),
+  validation: () => request<Validation>("/api/validation"),
+  coinBrains: () => request<CoinBrain[]>("/api/coin-brains"),
+  adaptiveActivity: (limit = 50) => request<AdaptiveActivityEntry[]>(`/api/adaptive-activity?limit=${limit}`),
+  roster: () => request<RosterInfo>("/api/roster"),
   candles: (symbol: string, timeframe = "1h", limit = 120) =>
     request<CandlePayload>(`/api/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
   setKillSwitch: (active: boolean, reason?: string) =>

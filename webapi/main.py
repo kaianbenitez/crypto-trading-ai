@@ -8,7 +8,7 @@ from fastapi import FastAPI, Depends, Response, HTTPException, WebSocket, WebSoc
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.config.settings import settings
-from agent.db.models import get_session, Trade, PerCoinBrainState, ParamChangeLog, TrailingStopEvent, CoinDigest
+from agent.db.models import get_session, Trade, PerCoinBrainState, ParamChangeLog, TrailingStopEvent, CoinDigest, RosterState
 from agent.exchange.binance_futures import BinanceFuturesAdapter
 from agent.dashboard.candlestick_panel import build_candlestick_payload
 from agent.dashboard.plain_english import simplify_lines
@@ -346,6 +346,23 @@ def adaptive_activity(limit: int = 50, session=Depends(db), _=Depends(require_se
         for e in trail_events
     ]
     return sorted(rows, key=lambda r: r["created_at"], reverse=True)[:safe_limit]
+
+
+@app.get("/api/roster")
+def roster(session=Depends(db), _=Depends(require_session)):
+    """Read-only view of the active/benched coin roster. Benching/unbenching
+    itself happens automatically via the daily roster review in the agent."""
+    record = session.query(RosterState).first()
+    if not record:
+        return {"active": [], "benched": [], "last_review": None}
+    return {
+        "active": json.loads(record.active_symbols),
+        "benched": [
+            {"symbol": sym, "until": until}
+            for sym, until in json.loads(record.benched_symbols).items()
+        ],
+        "last_review": record.last_review,
+    }
 
 
 @app.websocket("/ws/prices")
