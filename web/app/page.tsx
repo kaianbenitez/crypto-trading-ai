@@ -61,15 +61,15 @@ function StatCard({
   return (
     <div style={{
       background: accent
-        ? `linear-gradient(135deg, ${accent}28 0%, ${accent}08 60%, var(--surface) 100%)`
+        ? `linear-gradient(135deg, ${accent}55 0%, ${accent}22 55%, ${accent}0f 100%)`
         : "var(--surface)",
-      border: `1px solid ${accent ? accent + "35" : "var(--border)"}`,
+      border: `1px solid ${accent ? accent + "60" : "var(--border)"}`,
       borderRadius: 14,
       padding: large ? "20px 20px" : "14px 16px",
       position: "relative",
       overflow: "hidden",
     }}>
-      {accent && <span style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${accent}, ${accent}00)`, borderRadius: "14px 14px 0 0" }} />}
+      {accent && <span style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: accent, borderRadius: "14px 14px 0 0" }} />}
       <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em" }}>{label}</div>
       {loading ? (
         <Skeleton h={large ? 32 : 24} />
@@ -148,7 +148,9 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
   const currentPrice = live?.mark_price ?? latestClose(payload);
   const openPnl = live?.unrealized_pnl ?? unrealizedPnl(trade, currentPrice);
   const openPct = live?.roi_pct ?? unrealizedPct(trade, currentPrice);
-  const note = detail.reasoning.thesis[0];
+  // Show every reason the agent gathered, not just the first — a single
+  // line was always the same generic regime restatement on every trade.
+  const note = detail.reasoning.thesis.join(" ");
   const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
   const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
     ? snapshot.actual_risk_usdt
@@ -284,13 +286,13 @@ function OpenPosition({ trade }: { trade: Trade }) {
         ${money.format(riskedAmt)} at risk
       </div>
 
-      {trade.entry_reasoning[0] && (
+      {trade.entry_reasoning.length > 0 && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
           <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
             Thesis
           </div>
           <div style={{ color: "var(--text)", fontSize: 11, lineHeight: 1.5 }}>
-            {trade.entry_reasoning[0]}
+            {specificReasoning(trade.entry_reasoning)}
           </div>
         </div>
       )}
@@ -311,6 +313,14 @@ function noteworthyExitReason(reason: string | null): string | null {
   return EXIT_REASON_LABEL[reason] ?? reason.replace(/_/g, " ");
 }
 
+// Every trade's reasoning always starts with the same generic market-read
+// restatement (it's already shown as the strategy/regime badge) — pick the
+// first line that's actually specific to this trade instead, so cards don't
+// all read identically.
+function specificReasoning(lines: string[]): string {
+  return lines.find(l => !l.startsWith("Market read:")) ?? lines[0] ?? "—";
+}
+
 // ── trade card (compact, used in a responsive grid instead of full-width rows) ─
 function TradeRow({ trade }: { trade: Trade }) {
   const pnl = trade.pnl_usdt ?? 0;
@@ -320,7 +330,7 @@ function TradeRow({ trade }: { trade: Trade }) {
   const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
     ? snapshot.actual_risk_usdt
     : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
-  const footerNote = noteworthyExitReason(trade.exit_reason) ?? trade.entry_reasoning[0] ?? "—";
+  const footerNote = noteworthyExitReason(trade.exit_reason) ?? specificReasoning(trade.entry_reasoning);
   return (
     <Link
       href={`/journal?trade=${trade.id}`}

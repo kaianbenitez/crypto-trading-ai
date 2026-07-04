@@ -8,7 +8,12 @@ from agent.dashboard.plain_english import friendly_regime, simplify_lines
 def position_reasoning(trade, current_context: dict | None = None) -> dict:
     context = current_context or {}
     entry_reasoning = trade.get_entry_reasoning()
-    thesis = simplify_lines(entry_reasoning[:3]) or ["This trade passed our entry checks when it opened."]
+    # Every entry always starts with a generic "Regime: ..." line — it's
+    # already shown separately as the strategy/regime badge, so the thesis
+    # should lead with the actual signal-specific reasons instead, or every
+    # trade's thesis would read identically.
+    specific_reasoning = [line for line in entry_reasoning if not line.startswith("Regime:")]
+    thesis = simplify_lines(specific_reasoning[:3]) or simplify_lines(entry_reasoning[:1]) or ["This trade passed our entry checks when it opened."]
     pnl = context.get("pnl_pct")
     regime = context.get("regime", trade.regime)
     now = f"Market right now: {friendly_regime(regime)}."
