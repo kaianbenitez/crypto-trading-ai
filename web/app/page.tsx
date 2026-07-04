@@ -307,6 +307,7 @@ function OpenPosition({ trade }: { trade: Trade }) {
 function TradeRow({ trade }: { trade: Trade }) {
   const pnl = trade.pnl_usdt ?? 0;
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
+  const pnlPct = trade.exit_price !== null ? unrealizedPct(trade, trade.exit_price) : undefined;
   return (
     <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -315,8 +316,15 @@ function TradeRow({ trade }: { trade: Trade }) {
         <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ color: pnlColor(pnl), fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>
-          {pnl >= 0 ? "+" : ""}{money.format(pnl)} <span style={{ fontSize: 10, fontWeight: 400, color: "var(--muted)" }}>USDT</span>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ color: pnlColor(pnl), fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>
+            {pnl >= 0 ? "+" : ""}{money.format(pnl)} <span style={{ fontSize: 10, fontWeight: 400, color: "var(--muted)" }}>USDT</span>
+          </span>
+          {pnlPct !== undefined && (
+            <span style={{ color: pnlColor(pnlPct), fontSize: 11, fontWeight: 600 }}>
+              ({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
+            </span>
+          )}
         </div>
         <span style={{ color: "var(--muted)", fontSize: 10 }}>
           {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "—"}
@@ -721,15 +729,19 @@ function Dashboard() {
         </Card>
 
         {/* Coin watch: daily price action + agent read + news sentiment per coin */}
-        {coinDigests.length > 0 && (
-          <div style={{ marginTop: 18 }}>
-            <Card title="Coin Watch" right={<span style={{ color: "var(--muted)", fontSize: 11 }}>Refreshed daily</span>} noPad>
+        <div style={{ marginTop: 18 }}>
+          <Card title="Coin Watch" right={<span style={{ color: "var(--muted)", fontSize: 11 }}>Refreshed daily, ~9 PM PH</span>} noPad>
+            {coinDigests.length > 0 ? (
               <div style={{ padding: "12px 20px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
                 {coinDigests.map(d => <CoinDigestCard key={d.symbol} digest={d} />)}
               </div>
-            </Card>
-          </div>
-        )}
+            ) : (
+              <div style={{ padding: "24px 20px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+                {loading ? "Loading…" : "No digest yet today — the agent builds one for every coin once a day, around 9 PM PH. Check back after the next run."}
+              </div>
+            )}
+          </Card>
+        </div>
 
       </main>
     </div>
