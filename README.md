@@ -147,29 +147,48 @@ journalctl -u telegram-bot -n 80 --no-pager
 ## Trade Narrative
 
 Every trade — open notification, close/postmortem, dashboard card, and journal
-entry — is built from one deterministic, template-based formatter
-(`agent/dashboard/trade_narrative.py`, no LLM involved). It reads only data
-already stored on the `Trade` row (`indicator_snapshot`, `entry_reasoning`,
-`params_snapshot`) plus a same-symbol lookback query, and produces:
+entry — is built from one deterministic, fact-based formatter
+(`agent/dashboard/trade_narrative.py`, no LLM involved). It reads concrete
+values already stored on the `Trade` row (`indicator_snapshot`,
+`entry_reasoning`, `params_snapshot`) plus a same-symbol lookback query, so
+two trades only read the same when their underlying numbers actually match —
+not a fixed template repeated across coins.
 
 - **Direction/strategy** — side, symbol, strategy label
 - **Confidence + EV** — the signal's confidence score and expected value in R
-- **Thesis** — the specific signal reasons (EMA/RSI/MACD/SMC), with the
-  generic "Regime: ..." line filtered out since it's shown separately
-- **Concern** — a flagged trade weakness (e.g. counter-trend bias, premium/
-  discount-zone entry, a failing memory pattern) — omitted if none applies
+- **Thesis** — coin/side/strategy-specific framing (e.g. "BNB is a
+  momentum-continuation long, not a value entry"), plus where the entry sits
+  in its recent range (late/premium, pullback-like, or mid-range) and whether
+  MTF is aligned — composed from `range_position` and `mtf_bias`, not fixed
+  wording. The generic "Regime: ..." line is filtered out since it's shown
+  separately.
+- **Why accepted** — concrete numbers: EV vs the required floor (and whether
+  the edge is thin or comfortable), MTF score/confidence, whether risk was
+  reduced by a portfolio/same-direction cap or a recovery/drawdown risk tier,
+  elevated ATR without a shock-block, and any SMC confluence boost.
+- **Weakness** — one line, picked by priority: a flagged entry concern
+  (premium/discount-zone, counter-structure bias, a failing memory pattern) if
+  one exists; otherwise a thin-EV or elevated-volatility flag if applicable;
+  otherwise omitted.
 - **Plan** — entry / stop-loss / take-profit / R:R / risk % / risk USDT
 - **Invalidation** — what proves the thesis wrong (strategy-specific)
-- **Past context** — the last same-symbol trade's outcome, if any
+- **Past context** — the last same-symbol trade's outcome, or a negative-
+  expectancy flag across the last 3+ same-symbol trades if the sample is
+  large enough; says "No useful \<coin\> sample yet" rather than inventing
+  context when there's no history
 - **Postmortem (closed trades only)** — a failure/result line that ties
-  directly back to the entry-time concern when one was flagged (instead of a
+  directly back to the entry-time weakness when one was flagged (instead of a
   generic explanation), a lesson, and compact stats (exit reason, R multiple,
   hold duration)
 
 Telegram open/close messages, the dashboard's open-position card, and the
 journal's expanded row all render these same sections via
 `agent/telegram/templates.py`, `agent/dashboard/reasoning_engine.py`, and the
-`/api/trades/{id}/narrative` endpoint respectively.
+`/api/trades/{id}/narrative` endpoint respectively. A standalone smoke check
+lives at `tests/smoke_trade_narrative.py` — run with the venv's Python from
+the repo root (`python -m tests.smoke_trade_narrative` or
+`python tests/smoke_trade_narrative.py`) — and asserts that different
+range-position/EV/risk/history combinations actually produce different text.
 
 ## Dashboard
 
@@ -178,8 +197,8 @@ The dashboard shows:
 - bankroll, ROI, PnL, win rate, open positions
 - service/agent status
 - active symbol roster
-- open-position details with structured reasoning (thesis/concern/
-  invalidation/past-context) and chart context
+- open-position details with structured reasoning (thesis/why-accepted/
+  weakness/invalidation/past-context) and chart context
 - recent closed trades
 - journal with the same structured narrative sections per trade, fetched on
   expand instead of a flat dump of every reasoning line

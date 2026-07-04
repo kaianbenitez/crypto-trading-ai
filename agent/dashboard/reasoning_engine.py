@@ -26,7 +26,8 @@ def position_reasoning(trade, current_context: dict | None = None, session=None)
 
     return {
         "thesis": n.thesis_lines,
-        "concern": n.concern_line,
+        "why_accepted": n.why_accepted_lines,
+        "weakness": n.weakness_line,
         "invalidation": n.invalidation_line,
         "past_context": n.past_context_line,
         "now": now_lines,

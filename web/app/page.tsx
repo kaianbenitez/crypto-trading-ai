@@ -228,9 +228,14 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
                 {note}
               </div>
             </div>
-            {detail.reasoning.concern && (
+            {detail.reasoning.why_accepted.length > 0 && (
+              <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>
+                Why accepted: {detail.reasoning.why_accepted.join(" ")}
+              </div>
+            )}
+            {detail.reasoning.weakness && (
               <div style={{ color: "var(--amber)", fontSize: 11, lineHeight: 1.4 }}>
-                ⚠ Concern: {detail.reasoning.concern}
+                ⚠ Weakness: {detail.reasoning.weakness}
               </div>
             )}
             <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>

@@ -99,8 +99,15 @@ function TradeRow({ trade, isOpen, onToggle, rowRef, highlighted }: {
                 <div style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>{narrative.thesis_lines.join(" ")}</div>
               </div>
 
-              {narrative.concern_line && (
-                <div style={{ color: "var(--amber)", fontSize: 12, lineHeight: 1.5 }}>⚠ Concern: {narrative.concern_line}</div>
+              {narrative.why_accepted_lines.length > 0 && (
+                <div>
+                  <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Why accepted</div>
+                  <div style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.6 }}>{narrative.why_accepted_lines.join(" ")}</div>
+                </div>
+              )}
+
+              {narrative.weakness_line && (
+                <div style={{ color: "var(--amber)", fontSize: 12, lineHeight: 1.5 }}>⚠ Weakness: {narrative.weakness_line}</div>
               )}
 
               <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>Invalidation: {narrative.invalidation_line}</div>

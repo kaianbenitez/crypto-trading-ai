@@ -52,7 +52,8 @@ export interface Trade {
 
 export interface PositionReasoning {
   thesis: string[];
-  concern: string | null;
+  why_accepted: string[];
+  weakness: string | null;
   invalidation: string;
   past_context: string | null;
   now: string[];
@@ -67,7 +68,8 @@ export interface TradeNarrative {
   confidence: number | null;
   ev_r: number | null;
   thesis_lines: string[];
-  concern_line: string | null;
+  why_accepted_lines: string[];
+  weakness_line: string | null;
   entry: number;
   stop_loss: number;
   take_profit: number;

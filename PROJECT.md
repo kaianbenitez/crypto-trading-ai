@@ -269,59 +269,90 @@ Every 1h candle close, per symbol:
 
 Open/close Telegram messages, the dashboard open-position card, and the
 journal's expanded row are all built from `agent/dashboard/trade_narrative.py`
-(`build_narrative(trade, session)`), a deterministic template — no LLM in the
-loop, only formatting of data already on the `Trade` row.
+(`build_narrative(trade, session)`) — a deterministic, **fact-based**
+composer, not a fixed template. No LLM in the loop; every line is assembled
+from concrete values already on the `Trade` row, so two trades only read the
+same when the underlying numbers genuinely match (verified by
+`tests/smoke_trade_narrative.py`).
 
 Sections produced:
 
-- **Thesis** — up to 2 signal-specific reasoning lines (EMA/RSI/MACD/SMC),
-  with the generic `"Regime: ..."` line filtered out (it's shown separately
-  as the strategy/regime label) so every trade's thesis isn't identical.
-- **Concern** — one line if a trade weakness was flagged at entry: structure
-  bias against the trade, a premium/discount-zone entry, a failing memory
-  pattern, or negative news sentiment. Omitted if none applied.
+- **Thesis** — coin/side/strategy-specific framing composed from real fields,
+  not boilerplate:
+  - `trend_following` → "{COIN} is a momentum-continuation {side}, not a
+    value entry."; `mean_reversion` → "{COIN} is a mean-reversion {side} at a
+    stretched extreme, not a trend-following play."
+  - `range_position` picks the entry-location phrase: long + `>=0.7` → late/
+    premium-zone continuation; long + `<=0.3` → pullback-like entry; short +
+    `<=0.3` → discount-zone chase warning; short + `>=0.7` → well-located
+    short.
+  - `mtf_bias` vs `side` → "MTF is aligned with the trade" or "MTF is mixed
+    against the higher timeframe."
+  - The generic `"Regime: ..."` entry_reasoning line is filtered out (shown
+    separately as the strategy/regime label) so thesis text isn't identical
+    across trades that only share a regime.
+- **Why accepted** — concrete numbers, not adjectives:
+  - `mtf_ev` vs `min_required_ev_r` → "thin, barely cleared the floor" when
+    the margin is under 25% of the requirement, "cleared comfortably" when
+    the margin exceeds the requirement itself.
+  - `mtf_score` + `confidence` as a compact fact line.
+  - `actual_risk_pct` vs `planned_risk_pct` → explains size reduction, citing
+    the recovery/drawdown risk tier or the portfolio/same-direction cap.
+  - `atr_ratio` → notes elevated volatility that stayed under the shock-block
+    threshold.
+  - `smc_boost` → mentioned only when present (order block/FVG/liquidity
+    sweep confluence).
+- **Weakness** — one line, chosen by priority: an entry-time concern
+  (premium/discount-zone, counter-structure bias, a failing memory pattern,
+  negative news) if one was flagged; else a thin-EV or elevated-ATR flag if
+  applicable; else omitted entirely (not padded with a generic sentence).
 - **Plan** — entry / stop-loss / take-profit / R:R, plus risk % and risk USDT
   read from `indicator_snapshot.actual_risk_pct` / `actual_risk_usdt`
   (falls back to the planned values, then to `|entry-stop|*qty`).
 - **Invalidation** — strategy-specific ("EMA/MACD flips against the trade"
   for trend_following, "price keeps pushing into the extreme" for
   mean_reversion).
-- **Past context** — the last same-symbol trade's outcome, via a lightweight
-  `session.query(Trade)` lookback; omitted if there's no prior trade.
+- **Past context** — a lightweight `session.query(Trade)` lookback (last 5
+  same-symbol closed trades): if 3+ exist and their combined expectancy is
+  negative, flags that explicitly ("size should stay reduced"); otherwise
+  reports the single most recent trade's outcome. Says "No useful \<coin\>
+  sample yet" rather than inventing context when there's no history.
 - **Postmortem (closed only)** — the failure/result line ties directly back
-  to the entry-time concern when one existed (e.g. "this looks more like
-  premium-zone risk than a normal pullback") instead of a generic
+  to the entry-time weakness when one existed (e.g. "this points more to
+  premium-zone entry than a normal trend continuation") instead of a generic
   explanation, plus a lesson line and compact stats (`Exit reason | R | Held`).
 
 Telegram format example (`agent/telegram/templates.py`):
 
 ```
-🟢 LONG | AVAX/USDT | trend_following
+🟢 LONG | BNB/USDT | trend_following
 Conf 0.50 | EV +1.66R | Risk 0.45%
 
 Thesis:
-Trend is bullish: price above EMA, MACD positive, ADX confirms strength.
-Concern: entry is late because price is near the premium/high end of range.
+BNB is a momentum-continuation long, not a value entry. MTF is aligned with the trade; entry is late — price is already near the upper end of its recent range.
+
+Why accepted:
+EV +1.66R vs required +0.42R — edge cleared the cost floor comfortably. MTF 70, confidence 0.50. Risk was reduced to 0.45% (from 1.50% planned) because the portfolio/same-direction risk cap reduced size (another position is already open).
+
+Weakness:
+Premium-zone entry: this is vulnerable if momentum stalls.
 
 Plan:
 Entry 6.86 | SL 6.79 | TP 7.01 | R:R 2.0
-Invalidation: SL hit or trend loses EMA support.
+Invalidation: Stop-loss hit, or price closes back below the trend average / MACD flips against the trade.
 
-Past context:
-Last AVAX trade stopped out, so re-entry needs stronger evidence and better timing.
+Past:
+No useful BNB sample yet.
 ```
 
 ```
 🔴 CLOSED | AVAX/USDT | LOSS | -7.20 USDT
 
 Why it failed:
-Price hit the stop before the setup could play out. This looks more like
-premium/high-end-of-range risk than a normal pullback.
+Stopped out before reaching meaningful profit. This points more to premium-zone entry than a normal trend continuation.
 
 Lesson:
-Don't treat a strong thesis as enough on its own when entry is near the
-premium/high end of range — require a stronger edge, a better entry, or
-smaller size in that situation.
+Don't treat a strong thesis as enough on its own when premium-zone entry is present — require a stronger edge (higher EV), a better entry, or smaller size.
 
 Stats:
 Exit reason: stop_loss | R: -1.0R | Held: 12m
@@ -330,6 +361,12 @@ Exit reason: stop_loss | R: -1.0R | Held: 12m
 Same sections are exposed to the frontend via:
 - `agent/dashboard/reasoning_engine.py` → `/api/open-positions-detail` (open positions)
 - `webapi/main.py` → `/api/trades/{id}/narrative` (journal, fetched on row expand)
+
+Smoke check: `tests/smoke_trade_narrative.py` builds fake trades with different
+`range_position`/EV/risk/history combinations directly against the real
+`Trade` model (in-memory SQLite) and asserts the resulting thesis/weakness/
+why-accepted/past-context text actually differs where it should. Run it with
+the VPS venv from the repo root: `venv/bin/python tests/smoke_trade_narrative.py`.
 
 ## Backtest Notes
 

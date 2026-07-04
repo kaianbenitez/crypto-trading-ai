@@ -23,7 +23,7 @@ def _ts() -> str:
 
 def opened(trade, session=None) -> str:
     """Structured open notification: direction/strategy, confidence+EV,
-    thesis, concern (trade weakness), plan, invalidation, and past
+    fact-based thesis, why accepted, weakness, plan, invalidation, and past
     same-symbol context — all built deterministically from trade_narrative."""
     n = build_narrative(trade, session)
     icon = "🟢" if n.side == "long" else "🔴"
@@ -32,23 +32,27 @@ def opened(trade, session=None) -> str:
     risk = f"{n.risk_pct:.2f}%" if n.risk_pct is not None else "—"
 
     lines = [
-        f"{icon} {n.side.upper()} | {n.symbol} | {friendly_strategy(n.strategy_name)}",
+        f"{icon} {n.side.upper()} | {n.symbol} | {n.strategy_name}",
         f"Conf {conf} | EV {ev} | Risk {risk}",
         "",
         "Thesis:",
-        *n.thesis_lines,
+        " ".join(n.thesis_lines),
     ]
-    if n.concern_line:
-        lines.append(f"Concern: {n.concern_line}")
+    if n.why_accepted_lines:
+        lines += ["", "Why accepted:", " ".join(n.why_accepted_lines)]
+    if n.weakness_line:
+        lines += ["", "Weakness:", n.weakness_line]
     lines += [
         "",
         "Plan:",
         f"Entry {n.entry:.4f} | SL {n.stop_loss:.4f} | TP {n.take_profit:.4f} | R:R {n.rr:.1f}",
         f"Invalidation: {n.invalidation_line}",
+        "",
+        "Past:",
+        n.past_context_line,
+        "",
+        f"⏰ {_ts()}",
     ]
-    if n.past_context_line:
-        lines += ["", "Past context:", n.past_context_line]
-    lines += ["", f"⏰ {_ts()}"]
     return "\n".join(lines)
 
 

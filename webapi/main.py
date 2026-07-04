@@ -100,7 +100,7 @@ def trade_narrative(trade_id: int, session=Depends(db), _=Depends(require_sessio
     return {
         "symbol": n.symbol, "side": n.side, "strategy_name": n.strategy_name, "regime": n.regime,
         "confidence": n.confidence, "ev_r": n.ev_r,
-        "thesis_lines": n.thesis_lines, "concern_line": n.concern_line,
+        "thesis_lines": n.thesis_lines, "why_accepted_lines": n.why_accepted_lines, "weakness_line": n.weakness_line,
         "entry": n.entry, "stop_loss": n.stop_loss, "take_profit": n.take_profit, "rr": n.rr,
         "risk_pct": n.risk_pct, "risk_usdt": n.risk_usdt,
         "invalidation_line": n.invalidation_line, "past_context_line": n.past_context_line,
