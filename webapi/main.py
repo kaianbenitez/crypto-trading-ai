@@ -1,20 +1,25 @@
 import asyncio
 import json
 import subprocess
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Depends, Response, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.config.settings import settings
-from agent.db.models import get_session, Trade, PerCoinBrainState, ParamChangeLog, TrailingStopEvent
+from agent.db.models import get_session, Trade, PerCoinBrainState, ParamChangeLog, TrailingStopEvent, CoinDigest
 from agent.exchange.binance_futures import BinanceFuturesAdapter
 from agent.dashboard.candlestick_panel import build_candlestick_payload
+from agent.dashboard.plain_english import simplify_lines
 from agent.dashboard.reasoning_engine import position_reasoning
+from agent.risk.bankroll import latest_risk_snapshot
 from webapi import app_state  # noqa: F401 (registers AgentState on the shared Base)
 from webapi.app_state import get_or_create_state
 from webapi.auth import verify_password, create_session_token, require_session, SESSION_COOKIE
-from webapi.schemas import LoginRequest, TradeOut, KillSwitchRequest, SummaryOut, AgentStatusOut, LivePositionOut
+from webapi.schemas import (
+    LoginRequest, TradeOut, KillSwitchRequest, SummaryOut, AgentStatusOut, LivePositionOut, CoinDigestOut,
+)
 
 app = FastAPI(title="Crypto Trading AI")
 
@@ -58,9 +63,9 @@ def list_trades(limit: int = 100, session=Depends(db), _=Depends(require_session
             id=t.id, symbol=t.symbol, side=t.side, strategy_name=t.strategy_name, regime=t.regime,
             entry_price=t.entry_price, exit_price=t.exit_price, qty=t.qty,
             stop_loss=t.stop_loss, take_profit=t.take_profit, leverage=t.leverage,
-            entry_reasoning=t.get_entry_reasoning(), indicator_snapshot=t.get_indicator_snapshot(),
+            entry_reasoning=simplify_lines(t.get_entry_reasoning()), indicator_snapshot=t.get_indicator_snapshot(),
             pnl_usdt=t.pnl_usdt, outcome=t.outcome, exit_reason=t.exit_reason,
-            postmortem=t.get_postmortem(), opened_at=t.opened_at, closed_at=t.closed_at,
+            postmortem=simplify_lines(t.get_postmortem()), opened_at=t.opened_at, closed_at=t.closed_at,
         )
         for t in trades
     ]
@@ -75,9 +80,9 @@ def get_trade(trade_id: int, session=Depends(db), _=Depends(require_session)):
         id=t.id, symbol=t.symbol, side=t.side, strategy_name=t.strategy_name, regime=t.regime,
         entry_price=t.entry_price, exit_price=t.exit_price, qty=t.qty,
         stop_loss=t.stop_loss, take_profit=t.take_profit, leverage=t.leverage,
-        entry_reasoning=t.get_entry_reasoning(), indicator_snapshot=t.get_indicator_snapshot(),
+        entry_reasoning=simplify_lines(t.get_entry_reasoning()), indicator_snapshot=t.get_indicator_snapshot(),
         pnl_usdt=t.pnl_usdt, outcome=t.outcome, exit_reason=t.exit_reason,
-        postmortem=t.get_postmortem(), opened_at=t.opened_at, closed_at=t.closed_at,
+        postmortem=simplify_lines(t.get_postmortem()), opened_at=t.opened_at, closed_at=t.closed_at,
     )
 
 
@@ -97,6 +102,38 @@ def summary(session=Depends(db), _=Depends(require_session)):
         kill_switch_active=state.kill_switch_active,
         bankroll_usdt=settings.bankroll_usdt,
     )
+
+
+@app.get("/api/risk-status")
+def risk_status(session=Depends(db), _=Depends(require_session)):
+    risk = latest_risk_snapshot(session, settings)
+    return {
+        "effective_bankroll_usdt": risk["effective_bankroll_usdt"],
+        "configured_bankroll_usdt": risk["configured_bankroll_usdt"],
+        "account_equity_usdt": risk["account_equity_usdt"],
+        "risk_pct": risk["risk_pct"],
+        "tier": risk["tier"],
+        "mode": risk["mode"],
+        "drawdown_pct": risk["drawdown_pct"],
+        "reason": risk["reason"],
+        "created_at": risk["created_at"],
+    }
+
+
+@app.get("/api/validation")
+def validation(session=Depends(db), _=Depends(require_session)):
+    risk = latest_risk_snapshot(session, settings)
+    return {
+        "risk": {
+            "effective_bankroll_usdt": risk["effective_bankroll_usdt"],
+            "risk_pct": risk["risk_pct"],
+            "tier": risk["tier"],
+            "mode": risk["mode"],
+            "reason": risk["reason"],
+        },
+        "metrics": asdict(risk["metrics"]),
+        "readiness": risk["readiness"],
+    }
 
 
 @app.post("/api/kill-switch")
@@ -226,6 +263,35 @@ def live_positions(_=Depends(require_session)):
             break_even_price=float(break_even) if break_even is not None else None,
         ))
     return out
+
+
+@app.get("/api/coin-digests", response_model=list[CoinDigestOut])
+def coin_digests(session=Depends(db), _=Depends(require_session)):
+    """Latest daily digest per coin: 24h price action, what the agent is
+    watching for, and free news sentiment. Refreshed once a day by the agent."""
+    rows = session.query(CoinDigest).order_by(CoinDigest.created_at.desc()).all()
+    latest_by_symbol: dict[str, CoinDigest] = {}
+    for row in rows:
+        if row.symbol not in latest_by_symbol:
+            latest_by_symbol[row.symbol] = row
+    return [
+        CoinDigestOut(
+            symbol=row.symbol,
+            price_low_24h=row.price_low_24h,
+            price_high_24h=row.price_high_24h,
+            price_change_pct_24h=row.price_change_pct_24h,
+            regime=row.regime,
+            watching_side=row.watching_side,
+            watch_low=row.watch_low,
+            watch_high=row.watch_high,
+            sentiment_score=row.sentiment_score,
+            sentiment_label=row.sentiment_label,
+            headlines=row.get_headlines(),
+            summary=row.summary,
+            created_at=row.created_at,
+        )
+        for row in sorted(latest_by_symbol.values(), key=lambda r: r.symbol)
+    ]
 
 
 @app.get("/api/coin-brains")

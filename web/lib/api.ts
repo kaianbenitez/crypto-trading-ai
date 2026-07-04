@@ -114,6 +114,22 @@ export interface LivePosition {
   break_even_price: number | null;
 }
 
+export interface CoinDigest {
+  symbol: string;
+  price_low_24h: number | null;
+  price_high_24h: number | null;
+  price_change_pct_24h: number | null;
+  regime: string | null;
+  watching_side: string | null;
+  watch_low: number | null;
+  watch_high: number | null;
+  sentiment_score: number | null;
+  sentiment_label: string | null;
+  headlines: string[];
+  summary: string;
+  created_at: string;
+}
+
 export interface AgentStatus {
   trading_agent: string;
   webapi: string;
@@ -138,6 +154,7 @@ export const api = {
   trade: (id: number) => request<Trade>(`/api/trades/${id}`),
   openPositionDetails: () => request<OpenPositionDetail[]>("/api/open-positions-detail"),
   livePositions: () => request<LivePosition[]>("/api/live-positions"),
+  coinDigests: () => request<CoinDigest[]>("/api/coin-digests"),
   candles: (symbol: string, timeframe = "1h", limit = 120) =>
     request<CandlePayload>(`/api/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
   setKillSwitch: (active: boolean, reason?: string) =>

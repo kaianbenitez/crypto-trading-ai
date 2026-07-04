@@ -7,7 +7,9 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from agent.config.settings import settings
-from agent.db.models import Trade
+from agent.dashboard.plain_english import friendly_regime, friendly_strategy
+from agent.db.models import CoinDigest, Trade
+from agent.risk.bankroll import latest_risk_snapshot
 from webapi.app_state import get_or_create_state
 
 MANILA = ZoneInfo("Asia/Manila")
@@ -83,9 +85,53 @@ def positions_report(session: Session) -> str:
     for t in trades:
         side_icon = "🟢" if t.side == "long" else "🔴"
         lines.extend([
-            f"{side_icon} {t.symbol} {t.side.upper()} | {t.strategy_name}",
-            f"Entry {t.entry_price:.4f} | SL {t.stop_loss:.4f} | TP {t.take_profit:.4f}",
+            f"{side_icon} {t.symbol} {t.side.upper()} | {friendly_strategy(t.strategy_name)}",
+            f"Entry {t.entry_price:.4f} | Safety stop {t.stop_loss:.4f} | Target {t.take_profit:.4f}",
         ])
+    return "\n".join(lines)
+
+
+def risk_report(session: Session) -> str:
+    risk = latest_risk_snapshot(session, settings)
+    metrics = risk["metrics"]
+    readiness = risk["readiness"]
+    lines = [
+        "Risk profile",
+        f"Bankroll: {risk['effective_bankroll_usdt']:.2f} USDT ({risk['mode']})",
+        f"Risk/trade: {risk['risk_pct']:.2f}% | Tier: {risk['tier']}",
+        f"30d DD: {metrics.max_drawdown_pct:.2f}% | PF: {metrics.profit_factor:.2f} | Exp: {metrics.expectancy_r:+.2f}R",
+        f"Live-ready: {'YES' if readiness['ready'] else 'NO'}",
+        f"Why: {risk['reason']}",
+    ]
+    if not readiness["ready"]:
+        lines.append("Missing: " + ", ".join(readiness["failed"]))
+    return "\n".join(lines)
+
+
+def validation_report(session: Session, period: str = "month") -> str:
+    days = 7 if period == "week" else 30
+    risk = latest_risk_snapshot(session, settings)
+    metrics = risk["metrics"]
+    readiness = risk["readiness"]
+    top_symbols = sorted(metrics.by_symbol.items(), key=lambda item: item[1]["pnl"], reverse=True)[:5]
+    top_strategies = sorted(metrics.by_strategy.items(), key=lambda item: item[1]["pnl"], reverse=True)[:5]
+    lines = [
+        f"Validation report ({days}d)",
+        f"Closed: {metrics.closed_count} | Open: {metrics.open_count} | Symbols: {metrics.distinct_symbols}",
+        f"P&L: {_fmt_money(metrics.total_pnl_usdt)} | ROI: {metrics.roi_pct:+.2f}%",
+        f"WR: {metrics.win_rate_pct:.1f}% | Exp: {metrics.expectancy_r:+.2f}R | PF: {metrics.profit_factor:.2f}",
+        f"Max DD: {metrics.max_drawdown_pct:.2f}% | Loss streak: {metrics.max_consecutive_losses}",
+        f"Re-entry: {metrics.reentry_count} trades | Exp {metrics.reentry_expectancy_r:+.2f}R | P&L {_fmt_money(metrics.reentry_pnl_usdt)}",
+        f"Costs: avg est {metrics.avg_estimated_cost_r:.2f}R | high-cost trades {metrics.high_cost_trade_count}",
+        f"Runners: {metrics.runner_count} | P&L {_fmt_money(metrics.runner_pnl_usdt)}",
+        f"Live-ready: {'YES' if readiness['ready'] else 'NO'}",
+    ]
+    if not readiness["ready"]:
+        lines.append("Missing: " + ", ".join(readiness["failed"]))
+    lines.append("By coin:")
+    lines.extend([f"- {sym}: {_fmt_money(row['pnl'])}, {row['avg_r']:+.2f}R, {row['win_rate_pct']:.0f}% WR" for sym, row in top_symbols] or ["- no closed trades"])
+    lines.append("By strategy:")
+    lines.extend([f"- {name}: {_fmt_money(row['pnl'])}, {row['avg_r']:+.2f}R, {row['win_rate_pct']:.0f}% WR" for name, row in top_strategies] or ["- no closed trades"])
     return "\n".join(lines)
 
 
@@ -109,6 +155,21 @@ def coin_report(session: Session, symbol_text: str) -> str:
         f"📍 Open: {'✅ yes' if open_trade else '❌ no'}\n"
         f"🔢 Last 20 closed: {len(trades)} | 🎯 WR {wr:.1f}% | 💰 P&L {_fmt_money(pnl)}"
     )
+
+
+def digest_report(session: Session, symbol_text: str) -> str:
+    symbol = symbol_text.upper()
+    if "/" not in symbol:
+        symbol = f"{symbol}/USDT"
+    row = (
+        session.query(CoinDigest)
+        .filter(CoinDigest.symbol == symbol)
+        .order_by(CoinDigest.created_at.desc())
+        .first()
+    )
+    if not row:
+        return f"🗞 {symbol}\nNo digest yet — it's built once a day. Check back after the next run."
+    return f"🗞 {symbol} ({friendly_regime(row.regime)})\n{row.summary}"
 
 
 def morning_brief(session: Session) -> str:

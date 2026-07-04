@@ -71,14 +71,8 @@ button, a {
 }
 
 @media (max-width: 860px) {
-  .dashboard-main-grid,
-  .empty-position-grid,
   .journal-detail-grid,
   .journal-notes-grid {
-    grid-template-columns: 1fr !important;
-  }
-
-  .position-grid {
     grid-template-columns: 1fr !important;
   }
 

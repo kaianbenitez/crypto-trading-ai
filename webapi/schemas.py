@@ -58,6 +58,22 @@ class LivePositionOut(BaseModel):
     break_even_price: float | None = None
 
 
+class CoinDigestOut(BaseModel):
+    symbol: str
+    price_low_24h: float | None = None
+    price_high_24h: float | None = None
+    price_change_pct_24h: float | None = None
+    regime: str | None = None
+    watching_side: str | None = None
+    watch_low: float | None = None
+    watch_high: float | None = None
+    sentiment_score: float | None = None
+    sentiment_label: str | None = None
+    headlines: list[str] = []
+    summary: str
+    created_at: datetime
+
+
 class AgentStatusOut(BaseModel):
     trading_agent: str
     webapi: str

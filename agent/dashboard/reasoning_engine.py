@@ -1,19 +1,26 @@
-"""Template-based dashboard reasoning for open positions."""
+"""Template-based dashboard reasoning for open positions, written in plain
+English for people with little to no trading background."""
 from __future__ import annotations
+
+from agent.dashboard.plain_english import friendly_regime, simplify_lines
 
 
 def position_reasoning(trade, current_context: dict | None = None) -> dict:
     context = current_context or {}
     entry_reasoning = trade.get_entry_reasoning()
-    thesis = entry_reasoning[:3] or ["Entry passed the strategy checks at execution."]
+    thesis = simplify_lines(entry_reasoning[:3]) or ["This trade passed our entry checks when it opened."]
     pnl = context.get("pnl_pct")
     regime = context.get("regime", trade.regime)
-    now = f"Current regime: {regime}."
+    now = f"Market right now: {friendly_regime(regime)}."
     if pnl is not None:
-        now += f" Position is {pnl:+.2f}% from entry."
-    next_plan = "Hold while price respects SL/TP plan; tighten only through trailing rules."
+        direction = "up" if pnl >= 0 else "down"
+        now += f" This position is {direction} {abs(pnl):.2f}% since it opened."
+    next_plan = "Letting it play out — the safety stop and profit target are already set on the exchange."
     if context.get("trail_active"):
-        next_plan = f"Trailing active near {context.get('stop_loss')}; avoid loosening the stop."
+        next_plan = (
+            f"The safety stop is following the price up to lock in gains (currently near {context.get('stop_loss')}). "
+            "It only ever moves in our favor, never back the other way."
+        )
     return {
         "thesis": thesis,
         "now": [now],

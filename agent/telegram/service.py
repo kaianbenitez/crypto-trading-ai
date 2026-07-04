@@ -13,11 +13,14 @@ from agent.db.models import CommandAudit, TelegramBotState, get_session
 from agent.telegram.notifier import TelegramNotifier
 from agent.telegram.reports import (
     coin_report,
+    digest_report,
     eod_recap,
     morning_brief,
     pnl_summary,
     positions_report,
+    risk_report,
     status_report,
+    validation_report,
     weekly_report,
 )
 from webapi.app_state import get_or_create_state
@@ -149,10 +152,23 @@ class TelegramService:
         if cmd == "/coin":
             _audit(session, user_id, cmd, arg_text, "ok")
             return coin_report(session, args[0] if args else "BTC")
+        if cmd == "/digest":
+            _audit(session, user_id, cmd, arg_text, "ok")
+            return digest_report(session, args[0] if args else "BTC")
         if cmd == "/report":
             report_type = args[0].lower() if args else "daily"
             _audit(session, user_id, cmd, report_type, "ok")
-            return weekly_report(session) if report_type == "weekly" else eod_recap(session)
+            if report_type == "weekly":
+                return weekly_report(session)
+            if report_type in {"validation", "validate"}:
+                return validation_report(session)
+            return eod_recap(session)
+        if cmd == "/risk":
+            _audit(session, user_id, cmd, arg_text, "ok")
+            return risk_report(session)
+        if cmd in {"/validate", "/validation"}:
+            _audit(session, user_id, cmd, arg_text, "ok")
+            return validation_report(session)
         if cmd == "/help":
             return (
                 "📖 Commands\n"
@@ -160,6 +176,7 @@ class TelegramService:
                 "📍 /positions\n"
                 "💰 /pnl today|week|month|all\n"
                 "🪙 /coin BTC\n"
+                "🗞 /digest BTC\n"
                 "📅 /report daily|weekly\n"
                 "⏸️ /pause all\n"
                 "▶️ /resume all"

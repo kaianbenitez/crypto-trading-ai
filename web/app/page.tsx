@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentStatus, api, CandlePayload, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
+import { AgentStatus, api, CandlePayload, CoinDigest, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
+import AuthGate from "./components/AuthGate";
 
 // ── formatters ─────────────────────────────────────────────────────────────
 const money  = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -54,6 +55,20 @@ const REGIME_META: Record<string, { label: string; color: string }> = {
   risk_off:      { label: "Risk Off",        color: "var(--red)"   },
   normal:        { label: "Normal",          color: "var(--green)" },
 };
+
+// Plain-language labels for raw strategy/regime codes still sent as short tags.
+const STRATEGY_LABEL: Record<string, string> = {
+  trend_following: "Trend-following",
+  mean_reversion: "Bounce (mean-reversion)",
+  volatility_filter: "Standing aside",
+};
+const TRADE_REGIME_LABEL: Record<string, string> = {
+  trending: "Trending",
+  ranging: "Sideways",
+  high_vol: "Volatile",
+};
+function friendlyStrategy(s?: string) { return s ? (STRATEGY_LABEL[s] ?? s.replace(/_/g, " ")) : "—"; }
+function friendlyTradeRegime(r?: string) { return r ? (TRADE_REGIME_LABEL[r] ?? r.replace(/_/g, " ")) : "—"; }
 
 // ── primitives ───────────────────────────────────────────────────────────────
 function Badge({ children, color, bg }: { children: React.ReactNode; color?: string; bg?: string }) {
@@ -172,18 +187,13 @@ function unrealizedPct(trade: Pick<Trade, "side" | "entry_price">, currentPrice?
 function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionDetail; payload?: CandlePayload; live?: LivePosition }) {
   const trade = detail.trade;
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
-  const snap = trade.indicator_snapshot || {};
-  const confidence = typeof snap.confidence === "number" ? snap.confidence : undefined;
-  const mtfEv = typeof snap.mtf_ev === "number" ? snap.mtf_ev : undefined;
-  const trailMode = typeof snap.trail_mode === "string" ? snap.trail_mode : "trail";
   // Prefer the exchange's own mark price / unrealized PnL / ROI — they account
   // for trading fees and break-even price, unlike the (close - entry) * qty
   // approximation from 1h candles, which was drifting a few dollars off.
   const currentPrice = live?.mark_price ?? latestClose(payload);
   const openPnl = live?.unrealized_pnl ?? unrealizedPnl(trade, currentPrice);
   const openPct = live?.roi_pct ?? unrealizedPct(trade, currentPrice);
-  const initialRisk = Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
-  const openR = openPnl !== undefined && initialRisk > 0 ? openPnl / initialRisk : undefined;
+  const note = detail.reasoning.thesis[0];
 
   return (
     <div style={{ background: "var(--surface)", border: `1px solid ${sideColor}24`, borderRadius: 10, overflow: "hidden" }}>
@@ -192,77 +202,54 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
           <CoinLogo symbol={trade.symbol} size={26} />
           <div>
             <div style={{ fontWeight: 700, fontSize: 14 }}>{trade.symbol}</div>
-            <div style={{ color: "var(--muted)", fontSize: 11 }}>{trade.strategy_name} · {trade.regime}</div>
+            <div style={{ color: "var(--muted)", fontSize: 11 }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
           </div>
           <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {confidence !== undefined && <Badge color="var(--accent)">Conf {confidence.toFixed(2)}</Badge>}
-          {mtfEv !== undefined && <Badge color={mtfEv >= 1 ? "var(--green)" : "var(--amber)"}>EV {mtfEv.toFixed(2)}R</Badge>}
-          <Badge color="var(--amber)">{trailMode}</Badge>
-        </div>
+        <span style={{ color: "var(--muted)", fontSize: 11 }}>
+          Opened {new Date(trade.opened_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+        </span>
       </div>
 
-      <div className="position-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 260px", gap: 10, padding: 10, alignItems: "start" }}>
-        <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 12, alignSelf: "start" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Unrealized P&L</div>
-              <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: 24, fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-                {openPnl === undefined ? "Loading" : `${openPnl >= 0 ? "+" : ""}$${money.format(openPnl)}`}
-              </div>
-              {(openR !== undefined || openPct !== undefined) && (
-                <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 5, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {openPct !== undefined && <span style={{ color: pnlColor(openPct) }}>{openPct >= 0 ? "+" : ""}{openPct.toFixed(2)}%</span>}
-                  {openR !== undefined && <span>{openR >= 0 ? "+" : ""}{openR.toFixed(2)}R</span>}
-                </div>
-              )}
+      <div style={{ padding: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Unrealized P&L</div>
+            <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: 24, fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+              {openPnl === undefined ? "Loading" : `${openPnl >= 0 ? "+" : ""}$${money.format(openPnl)}`}
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Current</div>
-              <div style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{currentPrice === undefined ? "..." : price4.format(currentPrice)}</div>
-            </div>
-          </div>
-
-          <PnlBar trade={trade} currentPrice={currentPrice} tall />
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-            {[
-              ["SL", price4.format(trade.stop_loss), "var(--red)"],
-              ["Entry", price4.format(trade.entry_price), "var(--accent)"],
-              ["TP", price4.format(trade.take_profit), "var(--green)"],
-            ].map(([label, value, color]) => (
-              <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 9px" }}>
-                <div style={{ color: color as string, fontSize: 11, fontWeight: 700 }}>{label}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{value}</div>
+            {openPct !== undefined && (
+              <div style={{ color: pnlColor(openPct), fontSize: 12, marginTop: 5 }}>
+                {openPct >= 0 ? "+" : ""}{openPct.toFixed(2)}% since entry
               </div>
-            ))}
+            )}
           </div>
-
+          <div style={{ textAlign: "right" }}>
+            <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Price now</div>
+            <div style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{currentPrice === undefined ? "..." : price4.format(currentPrice)}</div>
+          </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-            {[
-              ["Confidence", confidence !== undefined ? confidence.toFixed(2) : "..."],
-              ["EV", mtfEv !== undefined ? `${mtfEv.toFixed(2)}R` : "..."],
-              ["Qty", price4.format(trade.qty)],
-              ["Opened", new Date(trade.opened_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })],
-            ].map(([label, value]) => (
-              <div key={label} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "7px 9px" }}>
-                <div style={{ color: "var(--muted)", fontSize: 10 }}>{label}</div>
-                <div style={{ fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{value}</div>
-              </div>
-            ))}
-          </div>
+        <PnlBar trade={trade} currentPrice={currentPrice} tall />
 
-          <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
-            <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 4 }}>Thesis</div>
-            <div style={{ color: "var(--text)", fontSize: 12, lineHeight: 1.35 }}>
-              {(detail.reasoning.thesis[0] || trade.strategy_name).replace(/\s+/g, " ")}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: note ? 10 : 0 }}>
+          {[
+            ["Safety stop", price4.format(trade.stop_loss), "var(--red)"],
+            ["Entry", price4.format(trade.entry_price), "var(--accent)"],
+            ["Target", price4.format(trade.take_profit), "var(--green)"],
+          ].map(([label, value, color]) => (
+            <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 9px" }}>
+              <div style={{ color: color as string, fontSize: 11, fontWeight: 700 }}>{label}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{value}</div>
             </div>
-          </div>
+          ))}
         </div>
+
+        {note && (
+          <div style={{ color: "var(--muted)", fontSize: 11.5, lineHeight: 1.45, paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+            {note}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -279,7 +266,7 @@ function OpenPosition({ trade }: { trade: Trade }) {
           <CoinLogo symbol={trade.symbol} size={30} />
           <div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>{trade.symbol.replace("/USDT", "")}<span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>/USDT</span></div>
-            <div style={{ color: "var(--muted)", fontSize: 11 }}>{trade.strategy_name} · {trade.regime}</div>
+            <div style={{ color: "var(--muted)", fontSize: 11 }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
           </div>
           <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
         </div>
@@ -316,30 +303,79 @@ function OpenPosition({ trade }: { trade: Trade }) {
   );
 }
 
-// ── trade row ────────────────────────────────────────────────────────────────
+// ── trade card (compact, used in a responsive grid instead of full-width rows) ─
 function TradeRow({ trade }: { trade: Trade }) {
   const pnl = trade.pnl_usdt ?? 0;
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid var(--border)" }} className="last:border-b-0">
-      <CoinLogo symbol={trade.symbol} size={22} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 600, fontSize: 13 }}>{trade.symbol.replace("/USDT", "")}</span>
-          <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
-          {trade.outcome && <Badge>{trade.outcome}</Badge>}
-        </div>
-        <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {trade.exit_reason || trade.entry_reasoning[0] || "—"}
-        </div>
+    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <CoinLogo symbol={trade.symbol} size={20} />
+        <span style={{ fontWeight: 600, fontSize: 13, flex: 1, minWidth: 0 }}>{trade.symbol.replace("/USDT", "")}</span>
+        <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
       </div>
-      <div style={{ textAlign: "right", flexShrink: 0 }}>
-        <div style={{ color: pnlColor(pnl), fontWeight: 700, fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
-          {pnl >= 0 ? "+" : ""}{money.format(pnl)} <span style={{ fontSize: 10, fontWeight: 400 }}>USDT</span>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ color: pnlColor(pnl), fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>
+          {pnl >= 0 ? "+" : ""}{money.format(pnl)} <span style={{ fontSize: 10, fontWeight: 400, color: "var(--muted)" }}>USDT</span>
         </div>
-        <div style={{ color: "var(--muted)", fontSize: 10, marginTop: 2 }}>
+        <span style={{ color: "var(--muted)", fontSize: 10 }}>
           {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "—"}
+        </span>
+      </div>
+      <div style={{ color: "var(--muted)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {trade.exit_reason || trade.entry_reasoning[0] || "—"}
+      </div>
+    </div>
+  );
+}
+
+// ── coin digest card (daily price action + agent read + news sentiment) ─────
+const SENTIMENT_META: Record<string, { icon: string; color: string }> = {
+  positive: { icon: "🙂", color: "var(--green)" },
+  negative: { icon: "🙁", color: "var(--red)" },
+  neutral:  { icon: "😐", color: "var(--muted)" },
+  "no data": { icon: "🤷", color: "var(--muted)" },
+};
+
+function CoinDigestCard({ digest }: { digest: CoinDigest }) {
+  const coin = digest.symbol.replace("/USDT", "");
+  const sentiment = SENTIMENT_META[digest.sentiment_label || "no data"] ?? SENTIMENT_META["no data"];
+  const change = digest.price_change_pct_24h;
+  const watching = digest.watching_side && digest.watch_low !== null && digest.watch_high !== null;
+
+  return (
+    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <CoinLogo symbol={digest.symbol} size={22} />
+        <span style={{ fontWeight: 700, fontSize: 13 }}>{coin}</span>
+        {change !== null && (
+          <span style={{ color: pnlColor(change), fontSize: 12, fontWeight: 600, marginLeft: "auto" }}>{pct(change)}</span>
+        )}
+      </div>
+
+      {digest.price_low_24h !== null && digest.price_high_24h !== null && (
+        <div style={{ color: "var(--muted)", fontSize: 11 }}>
+          24h range: {price4.format(digest.price_low_24h)} – {price4.format(digest.price_high_24h)}
         </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span title={digest.sentiment_label ?? "no data"} style={{ fontSize: 13 }}>{sentiment.icon}</span>
+        <span style={{ color: sentiment.color, fontSize: 11, fontWeight: 600 }}>
+          News: {digest.sentiment_label === "no data" ? "not tracked" : digest.sentiment_label}
+        </span>
+      </div>
+
+      {watching ? (
+        <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 8px", fontSize: 11 }}>
+          👀 Watching for a <b style={{ color: digest.watching_side === "long" ? "var(--green)" : "var(--red)" }}>{digest.watching_side?.toUpperCase()}</b> near {price4.format(digest.watch_low!)}–{price4.format(digest.watch_high!)}
+        </div>
+      ) : (
+        <div style={{ color: "var(--muted)", fontSize: 11 }}>No active setup — just watching.</div>
+      )}
+
+      <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4, paddingTop: 6, borderTop: "1px solid var(--border)" }}>
+        {digest.summary}
       </div>
     </div>
   );
@@ -358,9 +394,69 @@ function Card({ title, right, children, noPad }: { title: string; right?: React.
   );
 }
 
+// ── agent status pill + dropdown ────────────────────────────────────────────
+const SERVICE_LIST: { name: string; key: keyof AgentStatus }[] = [
+  { name: "Trading Agent", key: "trading_agent" },
+  { name: "API Backend",   key: "webapi" },
+  { name: "Dashboard",     key: "dashboard" },
+  { name: "Nginx",         key: "nginx" },
+  { name: "Exchange",      key: "exchange" },
+];
+
+function AgentStatusPill({ status }: { status?: AgentStatus | null }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  const states = SERVICE_LIST.map(s => status?.[s.key] as string | undefined);
+  const known = states.filter(Boolean);
+  const allOk = known.length > 0 && known.every(s => s === "active");
+  const anyDown = states.some(s => s === "inactive" || s === "failed");
+
+  const icon = !status ? "…" : anyDown ? "!" : allOk ? "✓" : "…";
+  const color = !status ? "var(--muted)" : anyDown ? "var(--amber)" : allOk ? "var(--green)" : "var(--muted)";
+  const label = !status ? "Checking…" : anyDown ? "Needs attention" : allOk ? "Agent live" : "Checking…";
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-label="Service status"
+        style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface2)", border: `1px solid ${color}30`, borderRadius: 20, padding: "4px 10px", cursor: "pointer" }}
+      >
+        <span style={{ width: 15, height: 15, borderRadius: "50%", background: color + "22", color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800, flexShrink: 0 }}>{icon}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color }}>{label}</span>
+        <span style={{ fontSize: 9, color: "var(--muted)" }}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 6, minWidth: 190, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+          {SERVICE_LIST.map((s, i) => {
+            const state = states[i];
+            return (
+              <div key={s.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 6px", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Dot state={state} />
+                  <span style={{ fontSize: 12, color: "var(--muted)" }}>{s.name}</span>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: serviceColor(state) }}>{serviceText(state)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── nav bar ──────────────────────────────────────────────────────────────────
 function NavBar({ killActive, status }: { killActive?: boolean; status?: AgentStatus | null }) {
-  const agentOk = status?.trading_agent === "active";
   return (
     <nav style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)", padding: "0 24px", height: 52, display: "flex", alignItems: "center", justifyContent: "space-between", position: "sticky", top: 0, zIndex: 50, backdropFilter: "blur(8px)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
@@ -379,13 +475,7 @@ function NavBar({ killActive, status }: { killActive?: boolean; status?: AgentSt
         ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {/* Agent health pill */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--surface2)", border: `1px solid ${agentOk ? "var(--green)22" : "var(--border)"}`, borderRadius: 20, padding: "4px 10px" }}>
-          <Dot state={status?.trading_agent} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: agentOk ? "var(--green)" : "var(--muted)" }}>
-            {agentOk ? "Agent live" : "Agent offline"}
-          </span>
-        </div>
+        <AgentStatusPill status={status} />
         {/* Testnet badge */}
         {status?.testnet && (
           <Badge color="var(--amber)">TESTNET</Badge>
@@ -443,6 +533,7 @@ function Dashboard() {
   const [positionDetails, setPositionDetails] = useState<OpenPositionDetail[]>([]);
   const [candlePayloads, setCandlePayloads] = useState<Record<string, CandlePayload>>({});
   const [livePositions, setLivePositions] = useState<Record<string, LivePosition>>({});
+  const [coinDigests, setCoinDigests] = useState<CoinDigest[]>([]);
   const [loading, setLoading] = useState(true);
   const [toggling,      setToggling]      = useState(false);
   const [confirmingHalt,setConfirmingHalt]= useState(false);
@@ -452,14 +543,15 @@ function Dashboard() {
 
   async function load() {
     try {
-      const [s, st, t, details, live] = await Promise.all([
+      const [s, st, t, details, live, digests] = await Promise.all([
         api.summary(),
         api.agentStatus(),
         api.trades(15),
         api.openPositionDetails(),
         api.livePositions().catch(() => []),
+        api.coinDigests().catch(() => []),
       ]);
-      setSummary(s); setStatus(st); setTrades(t); setPositionDetails(details); setError(null);
+      setSummary(s); setStatus(st); setTrades(t); setPositionDetails(details); setCoinDigests(digests); setError(null);
       const liveBySymbol: Record<string, LivePosition> = {};
       live.forEach(p => {
         const norm = p.symbol.includes("/") ? p.symbol : p.symbol.replace(/USDT$/, "/USDT");
@@ -585,115 +677,59 @@ function Dashboard() {
           <StatCard label="Macro" value={regimeMeta.label} color={regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regimeMeta.color} />
         </div>
 
-        {/* Middle row: services + symbols | open positions */}
-        <div className="dashboard-main-grid" style={{ display: "grid", gridTemplateColumns: "340px minmax(0, 1fr)", gap: 14, marginBottom: 18 }}>
-
-          {/* Left col: services + market */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Card title="Services">
-              <div>
-                {[
-                  { name: "Trading Agent", key: "trading_agent" as keyof AgentStatus },
-                  { name: "API Backend",   key: "webapi"         as keyof AgentStatus },
-                  { name: "Dashboard",     key: "dashboard"      as keyof AgentStatus },
-                  { name: "Nginx",         key: "nginx"          as keyof AgentStatus },
-                  { name: "Exchange",      key: "exchange"       as keyof AgentStatus },
-                ].map(({ name, key }) => {
-                  const state = status?.[key] as string | undefined;
-                  return (
-                    <div key={name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--border)" }} className="last:border-b-0">
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <Dot state={state} />
-                        <span style={{ color: "var(--muted)", fontSize: 12 }}>{name}</span>
-                      </div>
-                      {loading ? <Skeleton w="50px" h={14} /> : (
-                        <span style={{ color: serviceColor(state), fontSize: 12, fontWeight: 600 }}>{serviceText(state)}</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-
-            <Card title="Market" right={<Badge color={regimeMeta.color}>{regimeMeta.label}</Badge>}>
-              <div style={{ padding: "12px 0" }}>
-                <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Active symbols</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {(status?.symbols?.length ? status.symbols : [
-                    "BTC/USDT","ETH/USDT","XRP/USDT","SOL/USDT","ADA/USDT",
-                    "BNB/USDT","DOGE/USDT","AVAX/USDT","LINK/USDT","DOT/USDT",
-                    "POL/USDT","LTC/USDT","UNI/USDT","ATOM/USDT","FIL/USDT",
-                  ]).map(s => (
-                    <div key={s} style={{ display: "flex", alignItems: "center", gap: 5, background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 8px" }}>
-                      <CoinLogo symbol={s} size={16} />
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{s.replace("/USDT", "")}</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 14, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-                  <span style={{ color: "var(--muted)", fontSize: 12 }}>Kill switch</span>
-                  <Badge color={killActive ? "var(--red)" : "var(--green)"}>{killActive ? "ON" : "OFF"}</Badge>
-                </div>
-              </div>
-            </Card>
+        {/* Open positions */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+            <h2 style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Open Positions</h2>
+            {openCount > 0 && <Badge color="var(--amber)">{openCount}</Badge>}
           </div>
-
-          {/* Right col: open positions */}
-          <div>
-            <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-              <h2 style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Open Positions</h2>
-              {openCount > 0 && <Badge color="var(--amber)">{openCount}</Badge>}
+          {positionDetails.length > 0 ? (
+            <div className="open-position-list" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 10 }}>
+              {positionDetails.map(d => (
+                <DetailedOpenPosition
+                  key={d.trade.id}
+                  detail={d}
+                  payload={candlePayloads[d.trade.symbol]}
+                  live={livePositions[d.trade.symbol]}
+                />
+              ))}
             </div>
-            {positionDetails.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {positionDetails.map(d => (
-                  <DetailedOpenPosition
-                    key={d.trade.id}
-                    detail={d}
-                    payload={candlePayloads[d.trade.symbol]}
-                    live={livePositions[d.trade.symbol]}
-                  />
-                ))}
-              </div>
-            ) : openTrades.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {openTrades.map(t => <OpenPosition key={t.id} trade={t} />)}
-              </div>
-            ) : (
-              <div className="empty-position-grid" style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, minHeight: 164, padding: 16, color: "var(--muted)", fontSize: 13, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, alignItems: "stretch" }}>
-                {loading ? (
-                  <div style={{ gridColumn: "1 / -1", alignSelf: "center", textAlign: "center" }}>Loading positions...</div>
-                ) : (
-                  <>
-                    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
-                      <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Scanning</div>
-                      <div>Active symbols are checked on each candle close.</div>
-                    </div>
-                    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
-                      <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>No Exposure</div>
-                      <div>No open testnet position is being managed right now.</div>
-                    </div>
-                    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: 14 }}>
-                      <div style={{ color: "var(--text)", fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Next Trade</div>
-                      <div>When a trade opens, chart and reasoning appear here.</div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+          ) : openTrades.length > 0 ? (
+            <div className="open-position-list" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 10 }}>
+              {openTrades.map(t => <OpenPosition key={t.id} trade={t} />)}
+            </div>
+          ) : (
+            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, minHeight: 90, padding: 16, color: "var(--muted)", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+              {loading ? "Loading positions..." : "No open position right now — the agent is scanning every active coin and will open one once a good setup shows up."}
+            </div>
+          )}
         </div>
 
         {/* Recent closed trades */}
-        <Card title="Recent Closed Trades" right={<a href="/journal" style={{ color: "var(--accent)", fontSize: 11, textDecoration: "none" }}>View all →</a>}>
-          {loading ? (
-            <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>Loading…</div>
-          ) : closedTrades.length > 0 ? (
-            closedTrades.map(t => <TradeRow key={t.id} trade={t} />)
-          ) : (
-            <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>No closed trades yet</div>
-          )}
+        <Card title="Recent Closed Trades" right={<a href="/journal" style={{ color: "var(--accent)", fontSize: 11, textDecoration: "none" }}>View all →</a>} noPad>
+          <div style={{ padding: "12px 20px 16px" }}>
+            {loading ? (
+              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>Loading…</div>
+            ) : closedTrades.length > 0 ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
+                {closedTrades.map(t => <TradeRow key={t.id} trade={t} />)}
+              </div>
+            ) : (
+              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>No closed trades yet</div>
+            )}
+          </div>
         </Card>
+
+        {/* Coin watch: daily price action + agent read + news sentiment per coin */}
+        {coinDigests.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <Card title="Coin Watch" right={<span style={{ color: "var(--muted)", fontSize: 11 }}>Refreshed daily</span>} noPad>
+              <div style={{ padding: "12px 20px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
+                {coinDigests.map(d => <CoinDigestCard key={d.symbol} digest={d} />)}
+              </div>
+            </Card>
+          </div>
+        )}
 
       </main>
     </div>
@@ -701,5 +737,9 @@ function Dashboard() {
 }
 
 export default function Page() {
-  return <Dashboard />;
+  return (
+    <AuthGate>
+      <Dashboard />
+    </AuthGate>
+  );
 }
