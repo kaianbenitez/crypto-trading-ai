@@ -95,7 +95,7 @@ class Settings:
     # volume filter but aren't real coins or aren't established enough to
     # trust. Degrades to volume-only filtering if the API is unavailable.
     market_scan_require_market_cap_rank: bool = os.getenv("MARKET_SCAN_REQUIRE_MARKET_CAP_RANK", "true").lower() == "true"
-    market_scan_min_market_cap_rank: int = int(os.getenv("MARKET_SCAN_MIN_MARKET_CAP_RANK", "200"))
+    market_scan_min_market_cap_rank: int = int(os.getenv("MARKET_SCAN_MIN_MARKET_CAP_RANK", "150"))
     market_scan_market_cap_api_url: str = os.getenv(
         "MARKET_SCAN_MARKET_CAP_API_URL", "https://api.coingecko.com/api/v3/coins/markets"
     )
