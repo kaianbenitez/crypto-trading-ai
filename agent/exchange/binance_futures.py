@@ -12,6 +12,12 @@ from agent.exchange.base import ExchangeAdapter, OHLCV, OrderResult
 # since no position exists yet at this point.
 _PERCENT_PRICE_MARKERS = ("-4131", "PERCENTPRICE", "PERCENT_PRICE")
 
+# Transient server-side failures (testnet infra hiccups, not a market/strategy
+# condition) — same "wait a moment and retry" treatment as PERCENT_PRICE.
+_TRANSIENT_MARKERS = _PERCENT_PRICE_MARKERS + (
+    "502", "503", "504", "Bad Gateway", "Service Unavailable", "Gateway Timeout",
+)
+
 
 class BinanceFuturesAdapter(ExchangeAdapter):
     def __init__(self):
@@ -66,8 +72,26 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         leverage = max(1, min(leverage, settings.max_leverage))
         self._client.set_leverage(leverage, symbol)
 
-    def _is_percent_price_error(self, e: Exception) -> bool:
-        return any(marker in str(e) for marker in _PERCENT_PRICE_MARKERS)
+    def _is_transient_error(self, e: Exception) -> bool:
+        if isinstance(e, (ccxt.NetworkError, ccxt.ExchangeNotAvailable, ccxt.RequestTimeout)):
+            return True
+        return any(marker in str(e) for marker in _TRANSIENT_MARKERS)
+
+    def _create_order_with_retry(self, *args, backoffs=(1.0, 2.0, 3.0), **kwargs):
+        """Wraps create_order with a bounded retry for transient failures
+        (testnet infra 502s, brief percent-price band violations). Raises
+        the original exception unchanged for anything non-transient, or once
+        retries are exhausted."""
+        last_error = None
+        for i in range(len(backoffs) + 1):
+            try:
+                return self._client.create_order(*args, **kwargs)
+            except Exception as e:
+                last_error = e
+                if not self._is_transient_error(e) or i == len(backoffs):
+                    raise
+                time.sleep(backoffs[i])
+        raise last_error
 
     def _marketable_limit_fallback(self, symbol: str, side: str, qty: float) -> dict:
         """Binance's percent-price band is tighter for MARKET orders than for
@@ -86,23 +110,14 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         )
 
     def place_market_order(self, symbol: str, side: str, qty: float) -> OrderResult:
-        order = None
-        last_error = None
-        backoffs = (1.0, 2.0, 3.0, 4.0)
-        for i, delay in enumerate(backoffs):
-            try:
-                order = self._client.create_order(symbol, "market", side, qty)
-                break
-            except Exception as e:
-                last_error = e
-                if not self._is_percent_price_error(e):
-                    raise
-                if i < len(backoffs) - 1:
-                    time.sleep(delay)
-
-        if order is None:
-            # Market orders exhausted retries — try one marketable IOC limit
-            # order before giving up, since it's checked against a wider band.
+        try:
+            order = self._create_order_with_retry(symbol, "market", side, qty, backoffs=(1.0, 2.0, 3.0, 4.0))
+        except Exception as last_error:
+            if not self._is_transient_error(last_error):
+                raise
+            # Market retries exhausted on a transient error — try one
+            # marketable IOC limit order before giving up, since Binance
+            # checks LIMIT orders against a wider percent-price band.
             try:
                 order = self._marketable_limit_fallback(symbol, side, qty)
                 if float(order.get("filled") or 0) <= 0:
@@ -121,7 +136,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     def close_position_market(self, symbol: str, entry_side: str, qty: float) -> OrderResult:
         close_side = "sell" if entry_side == "buy" else "buy"
-        order = self._client.create_order(symbol, "market", close_side, qty, params={"reduceOnly": True})
+        order = self._create_order_with_retry(symbol, "market", close_side, qty, params={"reduceOnly": True})
         return OrderResult(
             order_id=str(order["id"]),
             symbol=symbol,
@@ -133,7 +148,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     def place_stop_loss(self, symbol: str, side: str, qty: float, stop_price: float) -> OrderResult:
         close_side = "sell" if side == "buy" else "buy"
-        order = self._client.create_order(
+        order = self._create_order_with_retry(
             symbol, "STOP_MARKET", close_side, qty,
             params={"stopPrice": stop_price, "reduceOnly": True},
         )
@@ -144,7 +159,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     def place_take_profit(self, symbol: str, side: str, qty: float, target_price: float) -> OrderResult:
         close_side = "sell" if side == "buy" else "buy"
-        order = self._client.create_order(
+        order = self._create_order_with_retry(
             symbol, "TAKE_PROFIT_MARKET", close_side, qty,
             params={"stopPrice": target_price, "reduceOnly": True},
         )
