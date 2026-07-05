@@ -22,6 +22,9 @@ class SimpleSettings:
     slippage_pct: float = 0.03
     default_leverage: int = 3
     max_leverage: int = 5
+    daily_drawdown_mode: str = "net"
+    confidence_risk_scaling: bool = True
+    confidence_full_risk_at: float = 0.6
 
 
 @dataclass

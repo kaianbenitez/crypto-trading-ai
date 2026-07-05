@@ -23,6 +23,8 @@ from agent.risk.trailing_stop_manager import TrailingStopManager  # noqa: E402
 from agent.strategy.signal import Side  # noqa: E402
 from agent.strategy.mean_reversion import mean_reversion_signal  # noqa: E402
 from agent.strategy import mtf_scorer  # noqa: E402
+from agent.backtest.engine import SimpleSettings  # noqa: E402
+from agent.config.settings import settings as live_settings  # noqa: E402
 
 failures = []
 
@@ -54,6 +56,37 @@ def make_settings(**overrides):
     )
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+def test_simple_settings_matches_orchestrator_construction():
+    """Regression guard: the orchestrator builds SimpleSettings by forwarding
+    every field straight off the live Settings object. If SimpleSettings is
+    ever missing a kwarg the orchestrator passes, this call crashes at
+    startup on every boot (real incident: daily_drawdown_mode /
+    confidence_risk_scaling / confidence_full_risk_at were added to Settings
+    and the live construction call but not to SimpleSettings itself)."""
+    try:
+        SimpleSettings(
+            bankroll_usdt=live_settings.bankroll_usdt,
+            max_risk_per_trade_pct=live_settings.max_risk_per_trade_pct,
+            max_daily_drawdown_pct=live_settings.max_daily_drawdown_pct,
+            max_concurrent_positions=live_settings.max_concurrent_positions,
+            max_portfolio_risk_pct=live_settings.max_portfolio_risk_pct,
+            max_same_direction_risk_pct=live_settings.max_same_direction_risk_pct,
+            min_entry_risk_pct=live_settings.min_entry_risk_pct,
+            min_stop_cost_multiple=live_settings.min_stop_cost_multiple,
+            taker_fee_pct=live_settings.taker_fee_pct,
+            slippage_pct=live_settings.slippage_pct,
+            default_leverage=live_settings.default_leverage,
+            max_leverage=live_settings.max_leverage,
+            daily_drawdown_mode=live_settings.daily_drawdown_mode,
+            confidence_risk_scaling=live_settings.confidence_risk_scaling,
+            confidence_full_risk_at=live_settings.confidence_full_risk_at,
+        )
+        ok = True
+    except TypeError:
+        ok = False
+    check("SimpleSettings accepts every kwarg the orchestrator forwards from Settings", ok)
 
 
 def test_ev_model():
@@ -174,6 +207,7 @@ def test_trailing_restore():
 
 
 def main():
+    test_simple_settings_matches_orchestrator_construction()
     test_ev_model()
     test_confidence_scaling()
     test_daily_drawdown()
