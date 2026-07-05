@@ -66,20 +66,50 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         leverage = max(1, min(leverage, settings.max_leverage))
         self._client.set_leverage(leverage, symbol)
 
+    def _is_percent_price_error(self, e: Exception) -> bool:
+        return any(marker in str(e) for marker in _PERCENT_PRICE_MARKERS)
+
+    def _marketable_limit_fallback(self, symbol: str, side: str, qty: float) -> dict:
+        """Binance's percent-price band is tighter for MARKET orders than for
+        LIMIT orders. If MARKET keeps getting rejected on a real price-band
+        violation (not just a fluke), cross the spread with an IOC limit order
+        instead — it fills immediately like a market order but is checked
+        against the wider LIMIT band."""
+        ticker = self._client.fetch_ticker(symbol)
+        bid, ask = ticker.get("bid"), ticker.get("ask")
+        if not bid or not ask:
+            raise RuntimeError(f"No bid/ask available for {symbol} to build a marketable limit fallback")
+        # Cross the spread generously (0.5%) so it fills like a market order.
+        price = ask * 1.005 if side == "buy" else bid * 0.995
+        return self._client.create_order(
+            symbol, "limit", side, qty, price, params={"timeInForce": "IOC"},
+        )
+
     def place_market_order(self, symbol: str, side: str, qty: float) -> OrderResult:
         order = None
         last_error = None
-        for attempt in range(3):
+        backoffs = (1.0, 2.0, 3.0, 4.0)
+        for i, delay in enumerate(backoffs):
             try:
                 order = self._client.create_order(symbol, "market", side, qty)
                 break
             except Exception as e:
                 last_error = e
-                if not any(marker in str(e) for marker in _PERCENT_PRICE_MARKERS) or attempt == 2:
+                if not self._is_percent_price_error(e):
                     raise
-                time.sleep(0.8 * (attempt + 1))
+                if i < len(backoffs) - 1:
+                    time.sleep(delay)
+
         if order is None:
-            raise last_error
+            # Market orders exhausted retries — try one marketable IOC limit
+            # order before giving up, since it's checked against a wider band.
+            try:
+                order = self._marketable_limit_fallback(symbol, side, qty)
+                if float(order.get("filled") or 0) <= 0:
+                    raise RuntimeError(f"IOC fallback for {symbol} did not fill: {order.get('status')}")
+            except Exception:
+                raise last_error from None
+
         return OrderResult(
             order_id=str(order["id"]),
             symbol=symbol,
