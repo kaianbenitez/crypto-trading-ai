@@ -1,8 +1,16 @@
+import time
+
 import ccxt
 from datetime import datetime, timezone
 
 from agent.config.settings import settings
 from agent.exchange.base import ExchangeAdapter, OHLCV, OrderResult
+
+# -4131 PERCENT_PRICE: the best counterparty price momentarily sat outside
+# Binance's allowed band around the mark/weighted price — common on thin
+# order books (e.g. UNI/USDT) for a tick or two. Retrying briefly is safe
+# since no position exists yet at this point.
+_PERCENT_PRICE_MARKERS = ("-4131", "PERCENTPRICE", "PERCENT_PRICE")
 
 
 class BinanceFuturesAdapter(ExchangeAdapter):
@@ -59,7 +67,19 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         self._client.set_leverage(leverage, symbol)
 
     def place_market_order(self, symbol: str, side: str, qty: float) -> OrderResult:
-        order = self._client.create_order(symbol, "market", side, qty)
+        order = None
+        last_error = None
+        for attempt in range(3):
+            try:
+                order = self._client.create_order(symbol, "market", side, qty)
+                break
+            except Exception as e:
+                last_error = e
+                if not any(marker in str(e) for marker in _PERCENT_PRICE_MARKERS) or attempt == 2:
+                    raise
+                time.sleep(0.8 * (attempt + 1))
+        if order is None:
+            raise last_error
         return OrderResult(
             order_id=str(order["id"]),
             symbol=symbol,
