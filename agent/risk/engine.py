@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 
 from agent.strategy.signal import Side
 
@@ -40,7 +40,8 @@ class RiskEngine:
         self.settings = settings
         self.params = params or {}
         self.bankroll_usdt = float(settings.bankroll_usdt)
-        self._daily_loss_usdt = 0.0
+        self._daily_loss_usdt = 0.0    # gross losses only (legacy mode)
+        self._daily_net_pnl_usdt = 0.0  # wins offset losses (default mode)
         self._daily_date: date | None = None
         self._open_positions: dict[str, OpenRisk] = {}
         self.kill_switch_active = False
@@ -53,18 +54,58 @@ class RiskEngine:
         return float(self.bankroll_usdt or self.settings.bankroll_usdt)
 
     def _roll_day(self):
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
         if self._daily_date != today:
             self._daily_date = today
             self._daily_loss_usdt = 0.0
+            self._daily_net_pnl_usdt = 0.0
             self.kill_switch_active = False
+
+    def _daily_drawdown_usdt(self) -> float:
+        """Today's drawdown per the configured mode: net (wins offset losses,
+        the standard definition) or losses_only (gross losses, stricter)."""
+        mode = str(getattr(self.settings, "daily_drawdown_mode", "net") or "net").lower()
+        if mode == "losses_only":
+            return self._daily_loss_usdt
+        return max(0.0, -self._daily_net_pnl_usdt)
 
     def record_trade_result(self, pnl_usdt: float):
         self._roll_day()
+        self._daily_net_pnl_usdt += pnl_usdt
         if pnl_usdt < 0:
             self._daily_loss_usdt += abs(pnl_usdt)
         max_dd = self.current_bankroll() * (self.settings.max_daily_drawdown_pct / 100)
-        if self._daily_loss_usdt >= max_dd:
+        if self._daily_drawdown_usdt() >= max_dd:
+            self.kill_switch_active = True
+
+    # -- Day-state persistence: the daily loss counter and auto kill-switch --
+    # -- live in memory, so without these hooks every service restart      --
+    # -- (i.e. every deploy) silently resets the daily drawdown protection. --
+
+    def export_day_state(self) -> dict:
+        return {
+            "daily_date": self._daily_date.isoformat() if self._daily_date else None,
+            "daily_loss_usdt": self._daily_loss_usdt,
+            "daily_net_pnl_usdt": self._daily_net_pnl_usdt,
+            "auto_kill_active": self.kill_switch_active,
+        }
+
+    def restore_day_state(self, state: dict | None):
+        if not state:
+            return
+        stored_date = state.get("daily_date")
+        if not stored_date:
+            return
+        try:
+            parsed = date.fromisoformat(str(stored_date))
+        except ValueError:
+            return
+        if parsed != datetime.now(timezone.utc).date():
+            return  # stale — a fresh day starts clean anyway
+        self._daily_date = parsed
+        self._daily_loss_usdt = float(state.get("daily_loss_usdt") or 0.0)
+        self._daily_net_pnl_usdt = float(state.get("daily_net_pnl_usdt") or 0.0)
+        if bool(state.get("auto_kill_active")):
             self.kill_switch_active = True
 
     def mark_position_opened(
@@ -108,13 +149,20 @@ class RiskEngine:
         atr: float,
         be_trigger_r: float = 1.0,
         atr_mult_sl: float = 1.5,
+        initial_stop: float | None = None,
     ) -> float | None:
         """Returns the new SL price if BE should be armed, else None.
 
         BE arms when unrealised profit >= be_trigger_r × initial risk (1R default).
         New SL is set to entry_price + small buffer to lock in breakeven.
+        Pass initial_stop (the actual entry-time stop) so 1R reflects the risk
+        actually taken, not a reconstruction from current ATR — volatility may
+        have shifted since entry.
         """
-        sl_distance = atr * atr_mult_sl
+        if initial_stop is not None and initial_stop > 0:
+            sl_distance = abs(entry_price - initial_stop)
+        else:
+            sl_distance = atr * atr_mult_sl
         if sl_distance <= 0:
             return None
         buffer = atr * 0.1  # tiny buffer above/below entry to avoid premature fill
@@ -128,7 +176,14 @@ class RiskEngine:
                 return entry_price - buffer
         return None
 
-    def plan_trade(self, symbol: str, side: Side, entry_price: float, atr: float) -> TradePlan:
+    def plan_trade(
+        self,
+        symbol: str,
+        side: Side,
+        entry_price: float,
+        atr: float,
+        confidence: float | None = None,
+    ) -> TradePlan:
         self._roll_day()
 
         if self.kill_switch_active:
@@ -179,6 +234,18 @@ class RiskEngine:
         if risk_pct <= 0 or (min_entry_risk_pct > 0 and risk_pct < min_entry_risk_pct):
             return TradePlan(side, 0, entry_price, 0, 0, 0, 0,
                               reject_reason=f"Remaining risk budget too small ({risk_pct:.2f}% < {min_entry_risk_pct:.2f}%)")
+
+        # Confidence-scaled sizing: low-conviction signals risk less. Scale-down
+        # only (never above the tier risk), floored at min_entry_risk_pct so an
+        # otherwise-approved trade isn't rejected purely for being low-confidence.
+        if (
+            confidence is not None
+            and bool(getattr(self.settings, "confidence_risk_scaling", False))
+        ):
+            full_at = float(getattr(self.settings, "confidence_full_risk_at", 0.6) or 0.6)
+            if full_at > 0 and confidence < full_at:
+                scaled = risk_pct * max(0.0, float(confidence)) / full_at
+                risk_pct = max(scaled, min_entry_risk_pct) if min_entry_risk_pct > 0 else scaled
 
         risk_amount = bankroll * (risk_pct / 100)
 

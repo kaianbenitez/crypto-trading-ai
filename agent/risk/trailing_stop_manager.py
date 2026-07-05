@@ -83,6 +83,18 @@ class TrailingStopManager:
         if atr <= 0:
             return None, mode, "ATR unavailable", False
 
+        # Live volatility override: trade.regime only ever holds trending/
+        # ranging, so the HIGH_VOL branch in mode_for never fires from stored
+        # state. Detect a volatility spike directly from the ATR series and
+        # switch to the wider chandelier trail so the position isn't shaken
+        # out by noise.
+        if mode != "chandelier" and "atr" in df:
+            atr_window = df["atr"].tail(30).dropna()
+            if len(atr_window) >= 10:
+                atr_baseline = float(atr_window.mean())
+                if atr_baseline > 0 and atr / atr_baseline >= float(params.get("trail_high_vol_atr_ratio", 1.8)):
+                    mode = "chandelier"
+
         old_stop = float(trade.stop_loss)
         is_major = False
 
@@ -158,7 +170,34 @@ class TrailingStopManager:
             self.adapter.cancel_order(trade.symbol, state.sl_order_id)
         except Exception:
             pass
-        order = self.adapter.place_stop_loss(trade.symbol, entry_side, trade.qty, new_stop)
+        try:
+            order = self.adapter.place_stop_loss(trade.symbol, entry_side, trade.qty, new_stop)
+        except Exception as e:
+            # The old SL is already cancelled — the position is unprotected.
+            # Restore protection at the old stop before giving up on this move.
+            try:
+                restore = self.adapter.place_stop_loss(trade.symbol, entry_side, trade.qty, old_stop)
+                state.sl_order_id = restore.order_id
+                return TrailResult(
+                    False, mode=mode,
+                    reason=f"trail placement failed ({e}); old stop restored",
+                )
+            except Exception as e2:
+                # Keep the (now-dead) order id: next cycle's maybe_update will
+                # try the cancel (silently a no-op) and attempt placement again,
+                # since trade.stop_loss was never advanced.
+                if self.tg_fn:
+                    try:
+                        self.tg_fn(
+                            f"🚨 {trade.symbol}: trailing SL replace failed AND restoring the old "
+                            f"stop failed — position may be UNPROTECTED. Will retry next cycle. ({e2})"
+                        )
+                    except Exception:
+                        pass
+                return TrailResult(
+                    False, mode=mode,
+                    reason=f"trail placement failed ({e}); restore also failed ({e2})",
+                )
         state.sl_order_id = order.order_id
         trade.stop_loss = new_stop
 

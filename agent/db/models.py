@@ -234,6 +234,19 @@ def _run_lightweight_migrations(engine) -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE roster_state ADD COLUMN scan_status TEXT"))
 
+    if "agent_state" in inspector.get_table_names():
+        existing_cols = {c["name"] for c in inspector.get_columns("agent_state")}
+        new_cols = {
+            "risk_day": "TEXT",
+            "daily_loss_usdt": "REAL",
+            "daily_net_pnl_usdt": "REAL",
+            "auto_kill_active": "BOOLEAN",
+        }
+        for col, col_type in new_cols.items():
+            if col not in existing_cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE agent_state ADD COLUMN {col} {col_type}"))
+
 
 _migrations_done = False
 

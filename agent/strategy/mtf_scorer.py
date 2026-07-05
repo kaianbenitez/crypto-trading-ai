@@ -14,15 +14,19 @@ Timeframes are weighted by their reliability / noise level:
 
 Weighted confluence score drives two outputs:
   1. Overall bias (bullish / neutral / bearish)
-  2. EV in R — expected value per trade given the confluence level,
-     computed as: EV = (win_prob × TP_mult) − ((1 − win_prob) × SL_mult)
-     where win_prob is derived from the confluence score.
+  2. EV in true R multiples — EV = (win_prob × RR) − (1 − win_prob),
+     where RR = atr_mult_tp / atr_mult_sl (reward per 1R risked) and
+     win_prob comes from a conservative score→probability mapping,
+     optionally blended with the bot's own realized win rates per
+     confluence bucket (see build_ev_calibration).
      EV < 0 = negative edge → don't trade regardless of TA signal.
 
 In live use (orchestrator): fetches each TF from the exchange directly.
 In backtesting: caller passes pre-resampled DataFrames to avoid extra
 API calls (resample 1h → 4h/1d with pandas).
 """
+from datetime import datetime, timezone
+
 import pandas as pd
 
 from agent.strategy.indicators import add_indicators
@@ -38,6 +42,106 @@ TF_WEIGHTS = {
 }
 
 MIN_EV_R = 0.25
+
+# ---------------------------------------------------------------------------
+# Win-probability model
+# ---------------------------------------------------------------------------
+# The old model used win_prob = score/100, which made a *neutral* market
+# (score 50) a coin flip — wildly optimistic at 2:1 reward:risk, where real
+# win rates run 35-45%. This mapping is deliberately conservative: neutral
+# confluence maps to ~35% (negative EV at 2:1), and only genuine directional
+# confluence produces a positive edge.
+#   directional score 50 (neutral)  -> 0.35
+#   directional score 65 (decent)   -> 0.44
+#   directional score 75 (strong)   -> 0.50
+_WIN_PROB_AT_NEUTRAL = 0.35
+_WIN_PROB_SLOPE = 0.6  # probability points gained per 100 score points
+_CALIBRATION_PRIOR_WEIGHT = 25  # pseudo-trades backing the base mapping
+_CALIBRATION_BUCKET_WIDTH = 10
+
+
+def base_win_prob(directional_score: float) -> float:
+    """Map a directional confluence score (0-100, >50 = favours the trade
+    direction) to a conservative win probability."""
+    p = _WIN_PROB_AT_NEUTRAL + (directional_score - 50.0) / 100.0 * _WIN_PROB_SLOPE
+    return min(0.85, max(0.05, p))
+
+
+def win_prob(directional_score: float, calibration: dict | None = None) -> float:
+    """Win probability, optionally blended with realized outcomes.
+
+    Blending is Bayesian-style: the base mapping acts as a prior worth
+    _CALIBRATION_PRIOR_WEIGHT pseudo-trades, so a thin sample nudges the
+    estimate slightly while a deep one dominates it.
+    """
+    p = base_win_prob(directional_score)
+    if not calibration:
+        return p
+    bucket = int(directional_score // _CALIBRATION_BUCKET_WIDTH) * _CALIBRATION_BUCKET_WIDTH
+    stats = (calibration.get("buckets") or {}).get(bucket)
+    if not stats:
+        return p
+    n = int(stats.get("n", 0))
+    wins = float(stats.get("wins", 0))
+    if n <= 0:
+        return p
+    blended = (p * _CALIBRATION_PRIOR_WEIGHT + wins) / (_CALIBRATION_PRIOR_WEIGHT + n)
+    return min(0.85, max(0.05, blended))
+
+
+def build_ev_calibration(session) -> dict:
+    """Bucket the bot's own closed trades by directional confluence score and
+    count realized wins, for blending into win_prob().
+
+    Directional score = mtf_score for longs, 100 - mtf_score for shorts, so
+    one table serves both sides. Returns {"buckets": {bucket: {n, wins}},
+    "total": N}; never raises.
+    """
+    buckets: dict[int, dict] = {}
+    total = 0
+    try:
+        from agent.db.models import Trade
+        closed = (
+            session.query(Trade)
+            .filter(Trade.closed_at.isnot(None), Trade.pnl_usdt.isnot(None))
+            .all()
+        )
+        for trade in closed:
+            snap = trade.get_indicator_snapshot() or {}
+            raw = snap.get("mtf_score")
+            if raw is None:
+                continue
+            score = float(raw)
+            if (trade.side or "").lower() == "short":
+                score = 100.0 - score
+            bucket = int(score // _CALIBRATION_BUCKET_WIDTH) * _CALIBRATION_BUCKET_WIDTH
+            entry = buckets.setdefault(bucket, {"n": 0, "wins": 0})
+            entry["n"] += 1
+            if float(trade.pnl_usdt) > 0:
+                entry["wins"] += 1
+            total += 1
+    except Exception:
+        return {"buckets": {}, "total": 0}
+    return {"buckets": buckets, "total": total}
+
+
+_calibration_cache: dict | None = None
+_calibration_fetched_at: datetime | None = None
+
+
+def get_ev_calibration(session, refresh_hours: float = 6.0) -> dict:
+    """Cached wrapper around build_ev_calibration — cheap to call every cycle."""
+    global _calibration_cache, _calibration_fetched_at
+    now = datetime.now(timezone.utc)
+    if (
+        _calibration_cache is not None
+        and _calibration_fetched_at is not None
+        and (now - _calibration_fetched_at).total_seconds() < refresh_hours * 3600
+    ):
+        return _calibration_cache
+    _calibration_cache = build_ev_calibration(session)
+    _calibration_fetched_at = now
+    return _calibration_cache
 
 
 def score_single_tf(df: pd.DataFrame, params: dict) -> dict:
@@ -170,6 +274,7 @@ def compute_confluence(
     tf_dataframes: dict[str, pd.DataFrame],
     params: dict,
     signal_side: str | None = None,
+    calibration: dict | None = None,
 ) -> dict:
     """Compute weighted MTF confluence score and EV.
 
@@ -178,6 +283,8 @@ def compute_confluence(
                        Pass only the TFs you have data for — missing TFs are skipped.
         params:        Strategy params dict.
         signal_side:   "long" | "short" | None — used to compute directional EV.
+        calibration:   Optional realized-outcome table from build_ev_calibration()
+                       to blend into the win-probability estimate.
 
     Returns dict with:
         weighted_score    float 0-100
@@ -219,17 +326,18 @@ def compute_confluence(
         ("bearish" if weighted_score < 45 else "neutral")
     )
 
-    # EV calculation
-    # win_prob for LONG = how bullish the score is (score/100)
-    # win_prob for SHORT = how bearish (1 - score/100)
-    atr_sl = params.get("atr_mult_sl", 1.5)
-    atr_tp = params.get("atr_mult_tp", 3.0)
+    # EV in true R multiples: risking 1R to win RR (= TP distance / SL distance).
+    # EV = p×RR − (1−p). Win probability comes from the conservative mapping in
+    # win_prob(), optionally blended with the bot's own realized outcomes.
+    atr_sl = float(params.get("atr_mult_sl", 1.5) or 1.5)
+    atr_tp = float(params.get("atr_mult_tp", 3.0) or 3.0)
+    rr = atr_tp / atr_sl if atr_sl > 0 else 2.0
 
-    win_prob_long  = weighted_score / 100
-    win_prob_short = 1.0 - win_prob_long
+    win_prob_long  = win_prob(weighted_score, calibration)
+    win_prob_short = win_prob(100.0 - weighted_score, calibration)
 
-    ev_long  = (win_prob_long  * atr_tp) - ((1 - win_prob_long)  * atr_sl)
-    ev_short = (win_prob_short * atr_tp) - ((1 - win_prob_short) * atr_sl)
+    ev_long  = (win_prob_long  * rr) - (1 - win_prob_long)
+    ev_short = (win_prob_short * rr) - (1 - win_prob_short)
 
     ev           = None
     approved     = False
@@ -262,6 +370,9 @@ def compute_confluence(
         "ev_long":         ev_long,
         "ev_short":        ev_short,
         "ev":              ev,
+        "win_prob_long":   win_prob_long,
+        "win_prob_short":  win_prob_short,
+        "calibrated_trades": int((calibration or {}).get("total", 0)),
         "approved":        approved,
         "block_reason":    block_reason,
     }

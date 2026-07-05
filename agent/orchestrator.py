@@ -34,7 +34,7 @@ from agent.fundamental.market_context import add_market_context
 from agent.risk.engine import RiskEngine
 from agent.strategy.ensemble import generate_signal
 from agent.strategy.indicators import add_indicators
-from agent.strategy.mtf_scorer import compute_confluence, resample_ohlcv
+from agent.strategy.mtf_scorer import compute_confluence, resample_ohlcv, get_ev_calibration
 from agent.strategy.signal import Side
 from agent.strategy.smc import add_smc
 from agent.backtest.validate import BASE_PARAMS
@@ -426,13 +426,53 @@ class EntryCandidate:
 
 
 # ---------------------------------------------------------------------------
+# Daily risk-state persistence — the drawdown counter and auto kill-switch are
+# in-memory, so without these a restart (i.e. every deploy) resets them.
+# ---------------------------------------------------------------------------
+
+def _restore_risk_day_state(session, risk):
+    try:
+        from webapi.app_state import get_or_create_state
+        st = get_or_create_state(session)
+        risk.restore_day_state({
+            "daily_date": st.risk_day,
+            "daily_loss_usdt": st.daily_loss_usdt,
+            "daily_net_pnl_usdt": st.daily_net_pnl_usdt,
+            "auto_kill_active": st.auto_kill_active,
+        })
+        if risk.kill_switch_active:
+            log.warning("Restored daily risk state — drawdown kill switch is still active for today")
+        elif st.risk_day:
+            log.info(f"Restored daily risk state for {st.risk_day}: net {st.daily_net_pnl_usdt or 0:+.2f} USDT")
+    except Exception as e:
+        log.warning(f"Could not restore daily risk state: {e}")
+
+
+def _persist_risk_day_state(session, risk):
+    try:
+        from webapi.app_state import get_or_create_state
+        st = get_or_create_state(session)
+        day = risk.export_day_state()
+        st.risk_day = day["daily_date"]
+        st.daily_loss_usdt = day["daily_loss_usdt"]
+        st.daily_net_pnl_usdt = day["daily_net_pnl_usdt"]
+        st.auto_kill_active = day["auto_kill_active"]
+        session.commit()
+    except Exception as e:
+        log.warning(f"Could not persist daily risk state: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Trade lifecycle
 # ---------------------------------------------------------------------------
 
 def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
     previous_risk_params = dict(risk.params)
     risk.params = dict(params)
-    plan = risk.plan_trade(state.symbol, signal.side, row["close"], row["atr"])
+    plan = risk.plan_trade(
+        state.symbol, signal.side, row["close"], row["atr"],
+        confidence=float(signal.confidence or 0) or None,
+    )
     risk.params = previous_risk_params
 
     if not plan.approved:
@@ -742,7 +782,14 @@ def _check_close(adapter, session, risk, state) -> bool:
     trade.set_postmortem(postmortem)
     session.commit()
 
+    was_killed = risk.kill_switch_active
     risk.record_trade_result(raw_pnl)
+    _persist_risk_day_state(session, risk)
+    if risk.kill_switch_active and not was_killed:
+        _tg(
+            f"🛑 Daily drawdown limit hit — no new entries for the rest of the day "
+            f"(net {risk.export_day_state()['daily_net_pnl_usdt']:+.2f} USDT today)."
+        )
     risk.mark_position_closed(state.symbol)
 
     recent = (
@@ -837,8 +884,12 @@ def run():
         slippage_pct=settings.slippage_pct,
         default_leverage=settings.default_leverage,
         max_leverage=settings.max_leverage,
+        daily_drawdown_mode=settings.daily_drawdown_mode,
+        confidence_risk_scaling=settings.confidence_risk_scaling,
+        confidence_full_risk_at=settings.confidence_full_risk_at,
     )
     risk   = RiskEngine(exch_settings)
+    _restore_risk_day_state(session, risk)
     bankroll_manager = BankrollManager(settings)
     risk_profile = bankroll_manager.sync(session, adapter)
     risk.set_bankroll(risk_profile.effective_bankroll_usdt)
@@ -1041,6 +1092,7 @@ def run():
                             mtf = compute_confluence(
                                 tf_dfs, state.params,
                                 signal_side=signal.side.value,
+                                calibration=get_ev_calibration(session),
                             )
                             signal.indicator_snapshot["mtf_score"]     = round(mtf["weighted_score"], 1)
                             signal.indicator_snapshot["mtf_bias"]      = mtf["overall_bias"]

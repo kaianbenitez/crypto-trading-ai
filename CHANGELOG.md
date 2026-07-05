@@ -5,6 +5,38 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-06
 
+- **Risk & strategy hardening pass** (from a full review of the risk/strategy stack):
+  - **Recalibrated the EV model.** The old formula treated the confluence score as a
+    literal win probability (a neutral market = 50% win rate), which made the EV floor
+    almost never binding, and it computed EV in ATR-units while everything downstream
+    treated it as R. EV is now true R multiples with a conservative score→probability
+    mapping (neutral ≈ 35%), optionally blended with the bot's own realized win rates
+    per confluence bucket (Bayesian prior, refreshed every 6h). Expect noticeably fewer
+    trades — the floor actually filters now.
+  - **Daily-drawdown state survives restarts.** The loss counter and auto kill-switch
+    were in-memory only, so every deploy reset them mid-day. Now persisted to the DB
+    and restored at startup (same-day only). Also: day rolls over at UTC midnight
+    explicitly, and drawdown is measured on net realized PnL by default
+    (`DAILY_DRAWDOWN_MODE=net`; `losses_only` keeps the old stricter behavior).
+    A Telegram alert now fires when the daily limit trips.
+  - **High-volatility chandelier trail actually fires now.** It was keyed off a regime
+    label (`HIGH_VOL`) that the live pipeline never produces — dead code. The trailing
+    manager now detects volatility spikes directly from the ATR series (current ATR ≥
+    1.8× its 30-candle mean) and switches to the wider chandelier trail.
+  - **Trailing-stop replacement can no longer strand a position unprotected.** If
+    placing the moved stop fails after the old one was cancelled, the old stop is
+    re-placed immediately; if that also fails, a Telegram alert fires and the next
+    cycle retries.
+  - **Same-direction risk cap tightened 1.5% → 1.0%** (below the portfolio cap) — two
+    same-direction alt positions are effectively one levered BTC-beta bet.
+  - **Confidence-scaled sizing (down only).** Signals below 0.6 confidence risk
+    proportionally less, floored at the minimum entry risk. Never sizes up.
+  - **Single-condition mean-reversion entries now require volume confirmation** — a
+    lone RSI dip or band touch on thin flow no longer trades.
+  - **Breakeven check uses the actual entry-time stop distance** instead of
+    reconstructing it from current ATR.
+  - New smoke test `tests/smoke_risk_and_ev.py` covers all of the above.
+
 - **Tighten market-cap rank floor 200 -> 150.** Live testing showed `VELVET/USDT` and a
   Chinese-named low-quality token still cleared the top-200 threshold. Tightened
   `MARKET_SCAN_MIN_MARKET_CAP_RANK` to 150 to exclude more marginal coins.

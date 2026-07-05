@@ -27,6 +27,7 @@ def mean_reversion_signal(row: pd.Series, prev: pd.Series, params: dict) -> Sign
     bb_long   = close <= bb_lower and bb_lower > 0
     rsi_short = rsi >= rsi_overbought
     bb_short  = close >= bb_upper and bb_upper > 0
+    vol_ok    = bool(row.get("vol_confirmed", False))
 
     # --- LONG setups ---
     if rsi_long and bb_long:
@@ -37,11 +38,16 @@ def mean_reversion_signal(row: pd.Series, prev: pd.Series, params: dict) -> Sign
             ],
             indicator_snapshot=snapshot, strategy_name="mean_reversion",
         )
-    if rsi_long or bb_long:
+    # Single-condition tier is the weakest signal in the book — require volume
+    # confirmation so a lone RSI dip / band touch on thin flow doesn't trade.
+    if (rsi_long or bb_long) and vol_ok:
         reason = f"RSI ({rsi:.1f}) oversold" if rsi_long else f"Price at lower Bollinger Band"
         return Signal(
             Side.LONG, confidence=0.45,
-            reasoning=[f"{reason} — moderate mean-reversion setup"],
+            reasoning=[
+                f"{reason} — moderate mean-reversion setup",
+                "Volume above SMA, confirming participation in the move",
+            ],
             indicator_snapshot=snapshot, strategy_name="mean_reversion",
         )
 
@@ -54,11 +60,21 @@ def mean_reversion_signal(row: pd.Series, prev: pd.Series, params: dict) -> Sign
             ],
             indicator_snapshot=snapshot, strategy_name="mean_reversion",
         )
-    if rsi_short or bb_short:
+    if (rsi_short or bb_short) and vol_ok:
         reason = f"RSI ({rsi:.1f}) overbought" if rsi_short else f"Price at upper Bollinger Band"
         return Signal(
             Side.SHORT, confidence=0.45,
-            reasoning=[f"{reason} — moderate mean-reversion setup"],
+            reasoning=[
+                f"{reason} — moderate mean-reversion setup",
+                "Volume above SMA, confirming participation in the move",
+            ],
+            indicator_snapshot=snapshot, strategy_name="mean_reversion",
+        )
+
+    if (rsi_long or bb_long or rsi_short or bb_short) and not vol_ok:
+        return Signal(
+            Side.NONE, confidence=0.0,
+            reasoning=[f"Single-condition setup (RSI={rsi:.1f}) without volume confirmation — skipping"],
             indicator_snapshot=snapshot, strategy_name="mean_reversion",
         )
 

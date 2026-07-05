@@ -36,11 +36,20 @@ class Settings:
     max_concurrent_positions: int = int(os.getenv("MAX_CONCURRENT_POSITIONS", "2"))
     split_risk_across_slots: bool = os.getenv("SPLIT_RISK_ACROSS_SLOTS", "true").lower() == "true"
     max_portfolio_risk_pct: float = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "1.5"))  # 0 = use active risk tier
-    max_same_direction_risk_pct: float = float(os.getenv("MAX_SAME_DIRECTION_RISK_PCT", "1.5"))  # 0 = portfolio cap
+    # Below the portfolio cap by default: alts are heavily BTC-correlated, so
+    # two same-direction alt positions are effectively one levered BTC-beta bet.
+    max_same_direction_risk_pct: float = float(os.getenv("MAX_SAME_DIRECTION_RISK_PCT", "1.0"))  # 0 = portfolio cap
     min_entry_risk_pct: float = float(os.getenv("MIN_ENTRY_RISK_PCT", "0.25"))
     min_stop_cost_multiple: float = float(os.getenv("MIN_STOP_COST_MULTIPLE", "5"))
     default_leverage: int = int(os.getenv("DEFAULT_LEVERAGE", "3"))
     max_leverage: int = int(os.getenv("MAX_LEVERAGE", "5"))
+    # "net" = wins offset losses (standard daily-drawdown definition);
+    # "losses_only" = gross losses trip the kill switch even on a net-green day.
+    daily_drawdown_mode: str = os.getenv("DAILY_DRAWDOWN_MODE", "net")
+    # Scale position risk down (never up) for low-confidence signals: full tier
+    # risk at/above confidence_full_risk_at, proportionally less below it.
+    confidence_risk_scaling: bool = os.getenv("CONFIDENCE_RISK_SCALING", "true").lower() == "true"
+    confidence_full_risk_at: float = float(os.getenv("CONFIDENCE_FULL_RISK_AT", "0.6"))
 
     taker_fee_pct: float = float(os.getenv("TAKER_FEE_PCT", "0.05"))
     slippage_pct: float = float(os.getenv("SLIPPAGE_PCT", "0.03"))
