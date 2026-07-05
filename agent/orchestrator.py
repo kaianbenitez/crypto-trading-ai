@@ -861,7 +861,6 @@ def run():
     log.info(f"Symbols: {SYMBOLS} | TF: {TIMEFRAME} | SMC: {USE_SMC}")
     log.info(f"Testnet: {settings.binance_testnet} | Bankroll: ${settings.bankroll_usdt}")
     log.info("=" * 60)
-    _tg(f"🤖 Trading bot started\nSymbols: {', '.join(SYMBOLS)}\nTestnet: {settings.binance_testnet}")
 
     if settings.exchange == "bybit":
         adapter = BybitFuturesAdapter()
