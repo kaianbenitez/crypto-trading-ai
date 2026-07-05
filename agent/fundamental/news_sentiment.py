@@ -1,9 +1,18 @@
-"""Free, no-LLM news sentiment for the daily coin digest.
+"""Free, no-auth news context for the daily coin digest.
 
-Uses CryptoPanic's free API (optional API key) for per-coin headlines, scored
-with a crypto-relevant keyword lexicon rather than an LLM call — this keeps
-the feature at zero ongoing cost. If no API key is configured, sentiment
-gracefully reports "no data" rather than failing the digest.
+Uses cryptocurrency.cv's free public news API (no API key, no signup) — it
+requires a "category" query param rather than an arbitrary coin symbol, so
+only BTC/ETH/SOL map directly to a topic category; every other coin falls
+back to the "general" market-news feed, keyword-filtered for the coin name
+where possible.
+
+Scored with a crypto-relevant keyword lexicon rather than an LLM call — this
+keeps the feature at zero ongoing cost and fully deterministic. News is
+display/context only: it feeds a small confidence nudge in the live strategy
+(see agent/dashboard/coin_digest.py's apply_sentiment_adjustment) and the
+daily coin digest, but it never opens a trade on its own, and any failure
+here (timeout, rate limit, shape change, outage) must never affect trading —
+every code path below degrades to an empty/no-data result instead of raising.
 """
 from __future__ import annotations
 
@@ -27,6 +36,11 @@ NEGATIVE_WORDS = [
     "vulnerability", "liquidation", "charges", "insolvent", "sell-off",
 ]
 
+# cryptocurrency.cv only supports a fixed topic-category list, not arbitrary
+# coin symbols — map the few coins that have a direct category, and use the
+# broad "general" feed (keyword-filtered) for everything else.
+_DIRECT_CATEGORY = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
+
 
 @dataclass
 class NewsSentiment:
@@ -39,25 +53,53 @@ def _coin_code(symbol: str) -> str:
     return symbol.split("/")[0].upper()
 
 
-def fetch_headlines(symbol: str, limit: int = 8) -> list[str]:
-    if not settings.cryptopanic_api_key:
+def _fetch_category(category: str, limit: int) -> list[dict]:
+    resp = requests.get(
+        settings.news_api_url,
+        params={"category": category},
+        timeout=settings.news_timeout_sec,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    articles = body.get("articles")
+    if not isinstance(articles, list):
         return []
+    return articles[:limit]
+
+
+def fetch_headlines(symbol: str, limit: int | None = None) -> list[str]:
+    """Returns up to `limit` headline strings for the coin, or [] on any
+    failure/disable — never raises, so a news outage can never affect
+    trading or crash the digest job."""
+    if not settings.news_enabled:
+        return []
+    limit = limit or settings.news_max_headlines
+    coin = _coin_code(symbol)
+
     try:
-        resp = requests.get(
-            "https://cryptopanic.com/api/v1/posts/",
-            params={
-                "auth_token": settings.cryptopanic_api_key,
-                "currencies": _coin_code(symbol),
-                "public": "true",
-                "kind": "news",
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-        return [r.get("title", "") for r in results[:limit] if r.get("title")]
+        category = _DIRECT_CATEGORY.get(coin, "general")
+        articles = _fetch_category(category, limit * 4 if category == "general" else limit)
+
+        if category == "general":
+            # No per-coin filter on the general feed — keep only headlines
+            # that actually mention this coin, falling back to the broad
+            # market feed (still useful context) if none do.
+            coin_name_hits = [
+                a for a in articles
+                if coin.lower() in (a.get("title", "") + " " + a.get("description", "")).lower()
+            ]
+            articles = coin_name_hits or articles
+
+        headlines = []
+        for a in articles[:limit]:
+            title = a.get("title")
+            description = a.get("description")
+            if not title:
+                continue
+            headlines.append(f"{title}. {description}" if description else title)
+        return headlines
     except Exception as e:
-        log.warning(f"[{symbol}] News fetch failed: {e}")
+        log.warning(f"[{symbol}] News fetch failed ({settings.news_provider}): {e}")
         return []
 
 
@@ -82,4 +124,11 @@ def score_headlines(headlines: list[str]) -> NewsSentiment:
 
 
 def get_sentiment(symbol: str) -> NewsSentiment:
-    return score_headlines(fetch_headlines(symbol))
+    try:
+        return score_headlines(fetch_headlines(symbol))
+    except Exception as e:
+        # Belt-and-suspenders: fetch_headlines already catches its own
+        # exceptions, but scoring/consumption must never be able to take
+        # trading down either.
+        log.warning(f"[{symbol}] News sentiment unavailable: {e}")
+        return NewsSentiment(score=0.0, label="no data", headlines=[])

@@ -69,3 +69,10 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     def cancel_order(self, symbol: str, order_id: str) -> None:
         ...
+
+    def fetch_all_tickers(self) -> dict:
+        """One cheap call returning {symbol: ticker} for every market on the
+        exchange — used by the dynamic market scanner's stage 1 (volume/
+        spread/momentum filtering) instead of per-symbol OHLCV calls. Default
+        raises; adapters that support it (Binance) override this."""
+        raise NotImplementedError("fetch_all_tickers not supported by this adapter")

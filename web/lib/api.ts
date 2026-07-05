@@ -193,8 +193,12 @@ export interface PerformanceMetrics {
   reentry_expectancy_r: number;
   avg_estimated_cost_r: number;
   high_cost_trade_count: number;
+  avg_net_r_after_estimated_cost: number;
+  expectancy_after_estimated_cost_r: number;
+  tiny_win_count: number;
   runner_count: number;
   runner_pnl_usdt: number;
+  exit_reason_breakdown: Record<string, number>;
   by_symbol: Record<string, { pnl: number; avg_r: number; win_rate_pct: number }>;
   by_strategy: Record<string, { pnl: number; avg_r: number; win_rate_pct: number }>;
 }
@@ -235,10 +239,29 @@ export interface AdaptiveActivityEntry {
   payload: Record<string, unknown>;
 }
 
+export interface MarketScanStatus {
+  enabled: boolean;
+  status: string;
+  last_scan_at?: string | null;
+  scanned?: number;
+  eligible?: number;
+  selected_count?: number;
+  selected?: string[];
+  rejected?: Record<string, number>;
+  error?: string;
+}
+
 export interface RosterInfo {
   active: string[];
   benched: { symbol: string; until: string }[];
   last_review: string | null;
+  scan: MarketScanStatus;
+}
+
+export interface NewsStatus {
+  enabled: boolean;
+  provider: string;
+  api_url: string;
 }
 
 export interface AgentStatus {
@@ -272,6 +295,7 @@ export const api = {
   coinBrains: () => request<CoinBrain[]>("/api/coin-brains"),
   adaptiveActivity: (limit = 50) => request<AdaptiveActivityEntry[]>(`/api/adaptive-activity?limit=${limit}`),
   roster: () => request<RosterInfo>("/api/roster"),
+  newsStatus: () => request<NewsStatus>("/api/news-status"),
   candles: (symbol: string, timeframe = "1h", limit = 120) =>
     request<CandlePayload>(`/api/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
   setKillSwitch: (active: boolean, reason?: string) =>

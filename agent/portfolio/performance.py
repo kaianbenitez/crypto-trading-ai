@@ -29,8 +29,12 @@ class PerformanceMetrics:
     reentry_expectancy_r: float = 0.0
     avg_estimated_cost_r: float = 0.0
     high_cost_trade_count: int = 0
+    avg_net_r_after_estimated_cost: float = 0.0
+    expectancy_after_estimated_cost_r: float = 0.0
+    tiny_win_count: int = 0
     runner_count: int = 0
     runner_pnl_usdt: float = 0.0
+    exit_reason_breakdown: dict[str, int] = field(default_factory=dict)
     by_symbol: dict[str, dict] = field(default_factory=dict)
     by_strategy: dict[str, dict] = field(default_factory=dict)
 
@@ -133,21 +137,42 @@ def build_performance_metrics(session, bankroll_usdt: float, days: int = 30) -> 
     reentries = [t for t in closed if t.id in reentry_ids]
     reentry_rs = [r_multiple(t) for t in reentries]
     estimated_cost_rs = []
+    net_r_after_cost_list = []
     high_cost_count = 0
+    tiny_win_count = 0
     runners = []
+    exit_reason_breakdown: dict[str, int] = {}
     for trade in closed:
         snap = trade.get_indicator_snapshot()
         try:
             cost_r = float(snap.get("estimated_cost_r") or 0.0)
         except Exception:
             cost_r = 0.0
+        realized_r = r_multiple(trade)
         if cost_r > 0:
             estimated_cost_rs.append(cost_r)
-            realized_r = abs(r_multiple(trade))
-            if realized_r > 0 and cost_r / realized_r >= 0.2:
+            net_r_after_cost_list.append(realized_r - cost_r)
+            if abs(realized_r) > 0 and cost_r / abs(realized_r) >= 0.2:
                 high_cost_count += 1
+        else:
+            net_r_after_cost_list.append(realized_r)
+        if 0 < realized_r < 0.5:
+            tiny_win_count += 1
         if trade.exit_reason == "trailing_take_profit":
             runners.append(trade)
+
+        reason = (trade.exit_reason or "other").lower()
+        if reason == "take_profit":
+            bucket = "take_profit"
+        elif reason == "stop_loss":
+            bucket = "stop_loss"
+        elif reason == "trailing_take_profit":
+            bucket = "trailing_take_profit"
+        elif "manual" in reason:
+            bucket = "manual"
+        else:
+            bucket = "other"
+        exit_reason_breakdown[bucket] = exit_reason_breakdown.get(bucket, 0) + 1
 
     return PerformanceMetrics(
         days=days,
@@ -168,8 +193,16 @@ def build_performance_metrics(session, bankroll_usdt: float, days: int = 30) -> 
         reentry_expectancy_r=round((sum(reentry_rs) / len(reentry_rs)) if reentry_rs else 0.0, 4),
         avg_estimated_cost_r=round((sum(estimated_cost_rs) / len(estimated_cost_rs)) if estimated_cost_rs else 0.0, 4),
         high_cost_trade_count=high_cost_count,
+        avg_net_r_after_estimated_cost=round(
+            (sum(net_r_after_cost_list) / len(net_r_after_cost_list)) if net_r_after_cost_list else 0.0, 4
+        ),
+        expectancy_after_estimated_cost_r=round(
+            (sum(net_r_after_cost_list) / len(net_r_after_cost_list)) if net_r_after_cost_list else 0.0, 4
+        ),
+        tiny_win_count=tiny_win_count,
         runner_count=len(runners),
         runner_pnl_usdt=round(sum(float(t.pnl_usdt or 0) for t in runners), 4),
+        exit_reason_breakdown=exit_reason_breakdown,
         by_symbol=_bucket(closed, "symbol"),
         by_strategy=_bucket(closed, "strategy_name"),
     )

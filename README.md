@@ -18,8 +18,10 @@ for Binance Futures testnet validation before any live-money use.
 
 ## What It Does
 
-- Scans a multi-coin roster:
-  - BTC, ETH, XRP, SOL, ADA, BNB, DOGE, AVAX, LINK, DOT, POL, LTC, UNI, ATOM, FIL
+- Scans a dynamic multi-coin roster (see "Dynamic Market Scanner" below) —
+  falls back to a fixed 15-coin list (BTC, ETH, XRP, SOL, ADA, BNB, DOGE,
+  AVAX, LINK, DOT, POL, LTC, UNI, ATOM, FIL) if the scanner is disabled or
+  fails.
 - Classifies market regime and routes setups by strategy leg.
 - Uses SMC/context filters, trend/mean-reversion logic, and MTF confluence.
 - Sizes trades from configured bankroll and stop distance.
@@ -60,6 +62,80 @@ Example: with `BANKROLL_USDT=1000`, normal tier risk `1.0%`, and
 That is about `5 USDT` risk per trade, with total open risk capped by
 `MAX_PORTFOLIO_RISK_PCT` and same-direction BTC-beta exposure capped by
 `MAX_SAME_DIRECTION_RISK_PCT`.
+
+## Cost/Edge Gates (fee-aware admission)
+
+Position sizing above answers "how much to risk." These gates separately
+answer "is the expected reward worth the round-trip cost at all" — added
+because thin wins (a few dollars against several dollars of risk) can net
+worse than they look once fees/slippage are counted:
+
+- `MIN_EDGE_AFTER_COST_R` (existing) — raw EV must clear
+  `cost_r + MIN_EDGE_AFTER_COST_R`, not just a flat floor.
+- `MAX_ESTIMATED_COST_R` — reject if the estimated round-trip cost itself
+  exceeds this many R (default `0.20`).
+- `MIN_NET_EV_AFTER_COST_R` — reject if `EV - estimated_cost_r` is below this
+  floor (default `0.25`), i.e. the edge net of cost must still be meaningful,
+  not just technically positive.
+- `MIN_EXPECTED_REWARD_COST_MULTIPLE` — reject if the planned reward
+  (`atr_mult_tp / atr_mult_sl`, in R) isn't at least this many multiples of
+  the estimated cost (default `5x`) — catches setups with a technically
+  acceptable EV but a reward too close to the cost to be worth the risk.
+
+None of these change position size — they're rejection-only. Per-trade cost
+facts (`gross_r`, `net_r_after_estimated_cost`, `cost_as_pct_of_gross_profit`,
+`estimated_round_trip_cost_usdt`, `high_cost_trade`) are stored on
+`indicator_snapshot` at entry, and the Risk page's "Fees & cost drag" card
+aggregates them across the last 30 days — `avg_net_r_after_estimated_cost`
+being meaningfully lower than the raw expectancy is the signal that fees are
+eating a real share of the edge.
+
+## Dynamic Market Scanner
+
+`agent/adapt/roster.py` can source the roster's candidate pool from a live
+scan of the whole exchange instead of (or in addition to) the fixed 15-coin
+list — two stages, so the expensive part (full indicators/SMC/MTF/EV/risk
+admission) still only ever runs on a short, curated list:
+
+1. **Stage 1 (cheap)** — one `fetch_tickers()` call across every USDT-M
+   perpetual on the exchange. Filters out stablecoins, leveraged tokens,
+   configured exclusions, symbols under `MARKET_SCAN_MIN_QUOTE_VOLUME`, and
+   spreads over `MARKET_SCAN_MAX_SPREAD_PCT`; ranks the rest by volume
+   (80%) + momentum (20%); keeps the top `MARKET_SCAN_TOP_N`.
+   `MARKET_SCAN_FIXED_MAJORS` are always included regardless of ranking.
+2. **Stage 2 (unchanged)** — only the shortlisted symbols ever reach the
+   full strategy stack; the existing 24h roster review (volume recheck,
+   win-rate bench/promote, cooldowns) still governs which of them are
+   actually *active* at any time.
+
+Refreshes on its own cadence (`MARKET_SCAN_REFRESH_MINUTES`, default 60) and
+is force-refreshed once a day alongside the roster review. Falls back to the
+fixed `CANDIDATE_SYMBOLS` list — silently, with a warning logged, trading
+uninterrupted — if disabled (`DYNAMIC_MARKET_SCAN=false`), unsupported by the
+active exchange adapter, or the scan call fails for any reason. Status
+(`enabled`/`status`/`last_scan_at`/counts/reject-reasons) is exposed via
+`/api/roster`'s `scan` field and shown on the Settings page.
+
+## News Context (cryptocurrency.cv)
+
+Free, no-auth headline context for the daily coin digest and a small
+confidence nudge — **never a trading signal on its own, never opens a trade
+by itself**. Uses [cryptocurrency.cv](https://cryptocurrency.cv)'s public
+news API, which requires a fixed `category` (not an arbitrary coin symbol):
+BTC/ETH/SOL map directly to their own category; every other coin falls back
+to the "general" market feed, keyword-filtered for the coin name where
+possible. Scored with a keyword lexicon (positive/negative crypto terms), not
+an LLM — zero ongoing cost, fully deterministic.
+
+CryptoPanic is no longer used (its free tier was discontinued/paywalled).
+`CRYPTOPANIC_API_KEY` still exists as a settings field only so an old `.env`
+with it set doesn't break anything — nothing reads it anymore.
+
+Any failure (timeout, rate limit, outage, response shape change) degrades to
+"no data"/"News unavailable right now — trading continues as usual" instead
+of raising; trading is never affected. Set `NEWS_ENABLED=false` to turn it
+off entirely (shows "News context is turned off." instead). Status is
+exposed via `/api/news-status` and shown on the Settings page.
 
 ## Telegram Commands
 
@@ -202,6 +278,11 @@ The dashboard shows:
 - recent closed trades
 - journal with the same structured narrative sections per trade, fetched on
   expand instead of a flat dump of every reasoning line
+- Settings page: dynamic market scanner status (enabled/last scan/counts) and
+  news provider status
+- Risk page: 30-day validation plus a "Fees & cost drag" card (avg estimated
+  cost, high-cost trade count, net R after cost, tiny-win count, exit-reason
+  breakdown)
 
 ## Handoff Docs
 

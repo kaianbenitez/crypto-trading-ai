@@ -63,10 +63,38 @@ class Settings:
     reentry_max_trades_per_symbol_per_day: int = int(os.getenv("REENTRY_MAX_TRADES_PER_SYMBOL_PER_DAY", "3"))
     reentry_min_ev_multiplier: float = float(os.getenv("REENTRY_MIN_EV_MULTIPLIER", "1.5"))
 
-    # Free-tier news sentiment for the daily coin digest (optional; digest just
-    # skips the news section if no key is set). No LLM calls — keyword-scored.
+    # Deprecated: CryptoPanic's free tier was discontinued/paywalled. Left
+    # here only so an old .env with this var set doesn't break; unused by
+    # agent.fundamental.news_sentiment, which now uses cryptocurrency.cv.
     cryptopanic_api_key: str = os.getenv("CRYPTOPANIC_API_KEY", "")
     coin_digest_hour_ph: int = int(os.getenv("COIN_DIGEST_HOUR_PH", "21"))  # 9 PM PHT ≈ start of a 9-5 Eastern workday
+
+    # Free, no-auth news context (cryptocurrency.cv) — display/sentiment-nudge
+    # only, never a trading signal on its own. Degrades to "no data" on any
+    # failure; trading is never blocked by this.
+    news_enabled: bool = os.getenv("NEWS_ENABLED", "true").lower() == "true"
+    news_provider: str = os.getenv("NEWS_PROVIDER", "cryptocurrency_cv")
+    news_api_url: str = os.getenv("NEWS_API_URL", "https://cryptocurrency.cv/api/news")
+    news_timeout_sec: int = int(os.getenv("NEWS_TIMEOUT_SEC", "8"))
+    news_max_headlines: int = int(os.getenv("NEWS_MAX_HEADLINES", "5"))
+
+    # Dynamic two-stage market scanner (agent/adapt/roster.py). Stage 1 is one
+    # cheap fetch_tickers() call across the whole exchange; only the top N
+    # shortlisted symbols get the full indicator/MTF/EV stack (stage 2).
+    dynamic_market_scan: bool = os.getenv("DYNAMIC_MARKET_SCAN", "true").lower() == "true"
+    market_scan_top_n: int = int(os.getenv("MARKET_SCAN_TOP_N", "30"))
+    market_scan_min_quote_volume: float = float(os.getenv("MARKET_SCAN_MIN_QUOTE_VOLUME", "50000000"))
+    market_scan_max_spread_pct: float = float(os.getenv("MARKET_SCAN_MAX_SPREAD_PCT", "0.15"))
+    market_scan_refresh_minutes: int = int(os.getenv("MARKET_SCAN_REFRESH_MINUTES", "60"))
+    market_scan_exclude_symbols: str = os.getenv("MARKET_SCAN_EXCLUDE_SYMBOLS", "USDC/USDT,TUSD/USDT,FDUSD/USDT")
+    market_scan_include_fixed_majors: bool = os.getenv("MARKET_SCAN_INCLUDE_FIXED_MAJORS", "true").lower() == "true"
+    market_scan_fixed_majors: str = os.getenv("MARKET_SCAN_FIXED_MAJORS", "BTC/USDT,ETH/USDT,SOL/USDT,XRP/USDT,ADA/USDT")
+
+    # Extra cost/edge gates layered on top of MIN_EDGE_AFTER_COST_R — these
+    # add rejection criteria only, they never change position size.
+    max_estimated_cost_r: float = float(os.getenv("MAX_ESTIMATED_COST_R", "0.20"))
+    min_net_ev_after_cost_r: float = float(os.getenv("MIN_NET_EV_AFTER_COST_R", "0.25"))
+    min_expected_reward_cost_multiple: float = float(os.getenv("MIN_EXPECTED_REWARD_COST_MULTIPLE", "5"))
 
 
 settings = Settings()

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import AuthGate from "../components/AuthGate";
 import Sidebar from "../components/Sidebar";
 import CoinLogo from "../components/CoinLogo";
-import { api, RosterInfo, Summary } from "@/lib/api";
+import { api, NewsStatus, RosterInfo, Summary } from "@/lib/api";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -18,13 +18,14 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 function SettingsContent() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [roster, setRoster] = useState<RosterInfo | null>(null);
+  const [news, setNews] = useState<NewsStatus | null>(null);
   const [toggling, setToggling] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function load() {
-    Promise.all([api.summary(), api.roster()])
-      .then(([s, r]) => { setSummary(s); setRoster(r); })
+    Promise.all([api.summary(), api.roster(), api.newsStatus()])
+      .then(([s, r, n]) => { setSummary(s); setRoster(r); setNews(n); })
       .catch(() => setError("Could not load settings"));
   }
 
@@ -91,6 +92,49 @@ function SettingsContent() {
                   Halt new entries
                 </button>
               )}
+            </div>
+          </Card>
+
+          <Card title="Market scanner">
+            {roster?.scan ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: !roster.scan.enabled ? "var(--muted)" : roster.scan.status === "ok" ? "var(--green)" : roster.scan.status === "error" ? "var(--red)" : "var(--amber)",
+                  }} />
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>
+                    {!roster.scan.enabled ? "Disabled — using fixed 15-coin list" : roster.scan.status === "ok" ? "Scanning the market" : roster.scan.status === "error" ? "Scan failed — using fallback" : "Not run yet"}
+                  </span>
+                </div>
+                {roster.scan.enabled && (
+                  <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.6 }}>
+                    {roster.scan.last_scan_at && (
+                      <div>Last scan: {new Date(roster.scan.last_scan_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
+                    )}
+                    {roster.scan.scanned !== undefined && (
+                      <div>{roster.scan.scanned} pairs scanned → {roster.scan.eligible} eligible → {roster.scan.selected_count} shortlisted</div>
+                    )}
+                    {roster.scan.error && <div style={{ color: "var(--red)" }}>Error: {roster.scan.error}</div>}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ color: "var(--muted)", fontSize: 13 }}>Loading…</div>
+            )}
+          </Card>
+
+          <Card title="News context">
+            {news ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: news.enabled ? "var(--green)" : "var(--muted)" }} />
+                <span style={{ fontSize: 13, fontWeight: 600 }}>{news.enabled ? `Enabled (${news.provider})` : "Disabled"}</span>
+              </div>
+            ) : (
+              <div style={{ color: "var(--muted)", fontSize: 13 }}>Loading…</div>
+            )}
+            <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 8 }}>
+              Context only — headlines never open a trade directly, at most a small confidence nudge on an already-qualified setup.
             </div>
           </Card>
 

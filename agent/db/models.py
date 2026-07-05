@@ -80,6 +80,7 @@ class RosterState(Base):
     active_symbols = Column(Text, nullable=False)   # JSON list
     benched_symbols= Column(Text, nullable=False)   # JSON dict {symbol: bench_until_iso}
     last_review    = Column(DateTime, nullable=True)
+    scan_status    = Column(Text, nullable=True)    # JSON dict — dynamic market scanner status, for webapi to read
 
 
 class TradeMemory(Base):
@@ -219,7 +220,32 @@ class CoinDigest(Base):
         return json.loads(self.headlines) if self.headlines else []
 
 
+def _run_lightweight_migrations(engine) -> None:
+    """create_all() only creates brand-new tables — it never ALTERs existing
+    ones. Any column added to an existing model after the table was first
+    created on a live DB needs to be added here too, or reads/writes to it
+    raise 'no such column' on deployments with existing data."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "roster_state" in inspector.get_table_names():
+        existing_cols = {c["name"] for c in inspector.get_columns("roster_state")}
+        if "scan_status" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE roster_state ADD COLUMN scan_status TEXT"))
+
+
+_migrations_done = False
+
+
 def get_session(db_path: str = "sqlite:///trading_agent.db"):
+    global _migrations_done
     engine = create_engine(db_path)
     Base.metadata.create_all(engine)
+    if not _migrations_done:
+        try:
+            _run_lightweight_migrations(engine)
+        except Exception:
+            pass  # best-effort; a fresh DB (create_all just made it) already has the column
+        _migrations_done = True
     return sessionmaker(bind=engine)()

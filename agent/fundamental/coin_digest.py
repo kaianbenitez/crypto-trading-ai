@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from agent.backtest.validate import BASE_PARAMS
+from agent.config.settings import settings
 from agent.dashboard.plain_english import friendly_regime, simplify_line
 from agent.fundamental.market_context import add_market_context
 from agent.fundamental.news_sentiment import get_sentiment
@@ -99,8 +100,10 @@ def build_coin_digest(symbol: str, adapter, params: dict | None = None) -> CoinD
         )
     else:
         parts.append("No active setup right now — just watching.")
-    if sentiment.label == "no data":
-        parts.append("No news source configured for this coin yet.")
+    if not settings.news_enabled:
+        parts.append("News context is turned off.")
+    elif sentiment.label == "no data":
+        parts.append("News unavailable right now — trading continues as usual.")
     else:
         parts.append(f"News sentiment: {sentiment.label} ({len(sentiment.headlines)} recent headline(s)).")
         if sentiment.headlines:

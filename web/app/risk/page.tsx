@@ -114,6 +114,31 @@ function RiskContent() {
               </Card>
             )}
 
+            {metrics && metrics.closed_count > 0 && (
+              <Card title="Fees & cost drag">
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
+                  <Stat label="Avg estimated cost" value={`${metrics.avg_estimated_cost_r.toFixed(2)}R`} />
+                  <Stat label="High-cost trades" value={String(metrics.high_cost_trade_count)} color={metrics.high_cost_trade_count > 0 ? "var(--amber)" : undefined} />
+                  <Stat label="Avg net R after cost" value={`${metrics.avg_net_r_after_estimated_cost >= 0 ? "+" : ""}${metrics.avg_net_r_after_estimated_cost.toFixed(2)}R`} color={pnlColor(metrics.avg_net_r_after_estimated_cost)} />
+                  <Stat label="Tiny wins (< +0.5R)" value={String(metrics.tiny_win_count)} color={metrics.tiny_win_count > metrics.closed_count * 0.3 ? "var(--amber)" : undefined} />
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 10 }}>
+                  &quot;Avg net R after cost&quot; is the realized result per trade minus the estimated round-trip fee/slippage —
+                  if this is much lower than the raw expectancy above, fees are eating a meaningful share of the edge.
+                </div>
+                {Object.keys(metrics.exit_reason_breakdown).length > 0 && (
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {Object.entries(metrics.exit_reason_breakdown).map(([reason, count]) => (
+                      <div key={reason} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
+                        <span style={{ color: "var(--muted)" }}>{reason.replace(/_/g, " ")}: </span>
+                        <span style={{ fontWeight: 700 }}>{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
+
             {metrics && Object.keys(metrics.by_symbol).length > 0 && (
               <Card title="By coin (last 30 days)">
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>

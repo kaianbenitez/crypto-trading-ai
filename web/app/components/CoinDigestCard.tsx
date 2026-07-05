@@ -34,7 +34,7 @@ export default function CoinDigestCard({ digest }: { digest: CoinDigest }) {
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span title={digest.sentiment_label ?? "no data"} style={{ fontSize: 13 }}>{sentiment.icon}</span>
         <span style={{ color: sentiment.color, fontSize: 11, fontWeight: 600 }}>
-          News: {digest.sentiment_label === "no data" ? "not tracked" : digest.sentiment_label}
+          News: {digest.sentiment_label === "no data" ? "unavailable" : digest.sentiment_label}
         </span>
       </div>
 

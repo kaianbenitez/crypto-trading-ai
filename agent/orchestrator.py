@@ -175,6 +175,52 @@ def _cost_context_r(row, side: Side, params: dict) -> tuple[float, float]:
     return cost_r, min_required
 
 
+def _cost_edge_metrics(row, side: Side, params: dict, cost_r: float, mtf_ev: float) -> dict:
+    """Extra cost/edge facts layered on top of the existing cost-aware floor
+    (_cost_context_r) — these only add rejection criteria, never change
+    position size. gross_r is the planned reward:risk multiple (fixed by
+    atr_mult_tp/atr_mult_sl, independent of the entry price)."""
+    atr_mult_sl = float(params.get("atr_mult_sl", 1.5)) or 1.5
+    atr_mult_tp = float(params.get("atr_mult_tp", 3.0))
+    gross_r = atr_mult_tp / atr_mult_sl if atr_mult_sl > 0 else 0.0
+    net_r_after_cost = mtf_ev - cost_r
+    cost_pct_of_gross = (cost_r / gross_r * 100) if gross_r > 0 else 0.0
+
+    # cost_r is already expressed as a fraction of 1R (dimensionless); convert
+    # to USDT using the risk amount this trade is actually sized to.
+    bankroll = float(params.get("bankroll_usdt") or 0)
+    risk_pct = float(params.get("max_risk_per_trade_pct") or 0)
+    risk_amount_usdt = bankroll * risk_pct / 100 if bankroll > 0 and risk_pct > 0 else None
+    round_trip_cost_usdt = cost_r * risk_amount_usdt if risk_amount_usdt is not None else None
+
+    return {
+        "gross_r": round(gross_r, 3),
+        "net_r_after_estimated_cost": round(net_r_after_cost, 3),
+        "cost_as_pct_of_gross_profit": round(cost_pct_of_gross, 2),
+        "estimated_round_trip_cost_usdt": round(round_trip_cost_usdt, 4) if round_trip_cost_usdt is not None else None,
+        "high_cost_trade": cost_r > settings.max_estimated_cost_r or cost_pct_of_gross >= 20.0,
+    }
+
+
+def _cost_edge_gate(metrics: dict, cost_r: float) -> str | None:
+    """Returns a rejection reason string, or None if the trade clears all
+    three extra cost/edge gates (reject-only; never adjusts size)."""
+    if cost_r > settings.max_estimated_cost_r:
+        return f"estimated cost {cost_r:.2f}R exceeds max {settings.max_estimated_cost_r:.2f}R"
+    if metrics["net_r_after_estimated_cost"] < settings.min_net_ev_after_cost_r:
+        return (
+            f"net EV after cost {metrics['net_r_after_estimated_cost']:.2f}R "
+            f"below floor {settings.min_net_ev_after_cost_r:.2f}R"
+        )
+    required_reward = settings.min_expected_reward_cost_multiple * cost_r
+    if cost_r > 0 and metrics["gross_r"] < required_reward:
+        return (
+            f"expected reward {metrics['gross_r']:.2f}R is less than "
+            f"{settings.min_expected_reward_cost_multiple:.0f}x estimated cost ({required_reward:.2f}R)"
+        )
+    return None
+
+
 def _live_position_snapshot(adapter, symbol: str) -> dict | None:
     clean_sym = _normalize_position_symbol(symbol)
     for pos in adapter.get_open_positions():
@@ -878,6 +924,14 @@ def run():
             macro = assess_macro(adapter)
             last_macro_update = now_utc.hour
 
+        # --- Dynamic market scan refresh (own cadence via MARKET_SCAN_REFRESH_MINUTES,
+        # this call is a cheap no-op if the cache isn't stale yet). Keeps the
+        # candidate pool warm between daily reviews and the API status fresh.
+        try:
+            roster.refresh_market_scan()
+        except Exception as e:
+            log.warning(f"Market scan refresh failed (continuing on fixed roster): {e}")
+
         # --- Daily roster review at 00:00 UTC ---
         if now_utc.hour == 0 and now_utc.hour != last_daily_review:
             roster.daily_review()
@@ -1093,6 +1147,20 @@ def run():
                             )
                             log.info(f"[{symbol}] {reason} - skipping")
                             signal_summary.append(f"{symbol}: {reason}")
+                            state.last_candle = now_candle
+                            continue
+
+                        # Extra cost/edge gates: reject-only, never adjusts size.
+                        # Catches trades that barely cleared the floor above but
+                        # still net a thin/fee-eaten result (the "$3-5 win"
+                        # pattern) — requires more reward relative to cost, not
+                        # just more EV relative to the minimum floor.
+                        cost_metrics = _cost_edge_metrics(row, signal.side, trade_params, cost_r, mtf_ev)
+                        signal.indicator_snapshot.update(cost_metrics)
+                        gate_reason = _cost_edge_gate(cost_metrics, cost_r)
+                        if gate_reason:
+                            log.info(f"[{symbol}] Cost/edge gate: {gate_reason} - skipping")
+                            signal_summary.append(f"{symbol}: cost/edge gate ({gate_reason})")
                             state.last_candle = now_candle
                             continue
 

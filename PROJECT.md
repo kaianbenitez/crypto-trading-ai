@@ -245,7 +245,14 @@ Every 1h candle close, per symbol:
 5. MTF confluence
    - 1h plus higher timeframe context.
    - Blocks opposing MTF bias.
-   - Blocks low expected value.
+   - Blocks low expected value (`MIN_EDGE_AFTER_COST_R` floor).
+   - Extra cost/edge gates (reject-only, never resize): `MAX_ESTIMATED_COST_R`,
+     `MIN_NET_EV_AFTER_COST_R`, `MIN_EXPECTED_REWARD_COST_MULTIPLE` — see
+     `agent/orchestrator.py::_cost_edge_metrics`/`_cost_edge_gate`. Added
+     because thin wins ($3-5 against $3.75-4.50 risked) can net worse than
+     they look once round-trip fees/slippage are counted; these require the
+     planned reward to actually clear cost by a real margin, not just clear
+     a flat EV floor.
 
 6. Risk engine
    - Position sizing from bankroll and risk percent.
@@ -264,6 +271,73 @@ Every 1h candle close, per symbol:
    - Numeric params may be tuned within bounds.
    - Per-coin brain can adjust size/SL/TP/trailing within bounds after enough data.
    - Telegram alerts and scheduled reports are enabled when env vars are configured.
+
+## Dynamic Market Scanner
+
+`agent/adapt/roster.py`, extended (not replaced) — two stages:
+
+1. **Stage 1** (`discover_market_universe`, cheap): one
+   `adapter.fetch_all_tickers()` call (Binance `fetch_tickers()` with no
+   args, one request for every USDT-M perpetual). Filters:
+   stablecoin bases (`USDC`, `BUSD`, `TUSD`, `FDUSD`, `DAI`, `USDP`, `PYUSD`,
+   `USTC`, `EUR`, `GBP`, `GUSD`, `USDD`), leveraged-token markers (`UP`,
+   `DOWN`, `BULL`, `BEAR` in the base), `MARKET_SCAN_EXCLUDE_SYMBOLS`,
+   `quoteVolume < MARKET_SCAN_MIN_QUOTE_VOLUME`, spread over
+   `MARKET_SCAN_MAX_SPREAD_PCT` (skipped if the ticker has no bid/ask), and
+   anything that isn't a `.../USDT` perpetual (ccxt symbols like
+   `BTC/USDT:USDT` are normalized by stripping the `:USDT` settlement
+   suffix). Ranks by `volume_score*0.8 + momentum_score*0.2` (volume is the
+   real gate; momentum is a tiebreaker, not a reason to trade an illiquid
+   pump). Keeps top `MARKET_SCAN_TOP_N`; `MARKET_SCAN_FIXED_MAJORS` are
+   always prepended regardless of rank.
+2. **Stage 2** (unchanged): only `CoinRoster.candidate_pool()`'s output ever
+   reaches the full indicator/SMC/MTF/EV/risk-admission stack in
+   `orchestrator.py`. The existing daily review (volume recheck, win-rate
+   bench/promote, cooldowns) still governs what's *active* right now.
+
+`CoinRoster.refresh_market_scan()` caches the scan for
+`MARKET_SCAN_REFRESH_MINUTES` (default 60), is called opportunistically every
+orchestrator cycle (cheap no-op if not stale) and force-refreshed once a day
+in `daily_review()`. On any failure (adapter doesn't support
+`fetch_all_tickers`, network error, empty result) it logs a warning and
+serves the last good cache, or `CANDIDATE_SYMBOLS` if there isn't one yet —
+this can never raise into the main loop or block trading.
+
+Scan status persists to `RosterState.scan_status` (new column, JSON) so the
+separate `webapi` process can read it — the live `CoinRoster` only exists in
+`trading-agent`'s memory. Exposed at `GET /api/roster`'s `scan` field.
+
+## News Context (cryptocurrency.cv)
+
+`agent/fundamental/news_sentiment.py` was rewritten off CryptoPanic (free
+tier discontinued/paywalled) onto
+[cryptocurrency.cv](https://cryptocurrency.cv)'s free, no-auth API
+(`GET /api/news?category=...`). Real response shape (confirmed live):
+`{"articles": [{"title", "link", "description", "pubDate", "source", ...}], "totalCount", ...}`
+— an empty `category` param returns `articles: []`, so a category is always
+required. It only supports a fixed category list (`general`, `bitcoin`,
+`ethereum`, `solana`, `defi`, `nft`, ... — no arbitrary coin symbols), so:
+- BTC → `bitcoin`, ETH → `ethereum`, SOL → `solana` (direct category)
+- everything else → `general`, keyword-filtered for the coin name in the
+  title/description (falls back to the unfiltered general feed if no
+  headline mentions the coin)
+
+Scored with the same keyword lexicon as before (no LLM, zero ongoing cost).
+Every failure mode (timeout, HTTP error, malformed/changed JSON shape,
+disabled via `NEWS_ENABLED=false`) is caught inside `fetch_headlines`/
+`get_sentiment` and returns `[]`/`NewsSentiment(label="no data")` — this can
+never raise into the orchestrator or the daily digest job.
+
+News affects the live strategy in exactly one place:
+`agent/fundamental/coin_digest.py::apply_sentiment_adjustment`, a ±0.05
+confidence nudge already gated behind a fresh (<36h) daily digest read — this
+was not changed by the provider swap. **News never opens a trade by itself.**
+
+Dashboard/digest wording: "News unavailable right now — trading continues as
+usual" (fetch failed) vs "News context is turned off." (`NEWS_ENABLED=false`)
+— replaced the old "not tracked" phrasing, which read as an error state
+rather than a normal disabled/no-data state. Status exposed at
+`GET /api/news-status`.
 
 ## Trade Narrative Format
 

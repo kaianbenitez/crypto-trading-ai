@@ -172,6 +172,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         positions = self._client.fetch_positions()
         return [p for p in positions if float(p.get("contracts") or 0) != 0]
 
+    def fetch_all_tickers(self) -> dict:
+        return self._client.fetch_tickers()
+
     def fetch_open_algo_orders(self, symbol: str) -> list[dict]:
         return self._client.fapiPrivateGetOpenAlgoOrders({"symbol": self._raw_symbol(symbol)})
 

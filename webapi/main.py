@@ -202,6 +202,17 @@ def agent_status(_=Depends(require_session)):
     )
 
 
+@app.get("/api/news-status")
+def news_status(_=Depends(require_session)):
+    """News provider config state — enabled/disabled, provider name. Does not
+    make a live API call; this is just the configuration, not a live probe."""
+    return {
+        "enabled": settings.news_enabled,
+        "provider": settings.news_provider,
+        "api_url": settings.news_api_url,
+    }
+
+
 @app.get("/api/open-positions-detail")
 def open_positions_detail(session=Depends(db), _=Depends(require_session)):
     trades = (
@@ -374,11 +385,21 @@ def adaptive_activity(limit: int = 50, session=Depends(db), _=Depends(require_se
 
 @app.get("/api/roster")
 def roster(session=Depends(db), _=Depends(require_session)):
-    """Read-only view of the active/benched coin roster. Benching/unbenching
-    itself happens automatically via the daily roster review in the agent."""
+    """Read-only view of the active/benched coin roster, plus the dynamic
+    market scanner's last-run status. Benching/unbenching and the scan itself
+    happen automatically in the agent process; this just reads what it wrote."""
     record = session.query(RosterState).first()
     if not record:
-        return {"active": [], "benched": [], "last_review": None}
+        return {
+            "active": [], "benched": [], "last_review": None,
+            "scan": {"enabled": settings.dynamic_market_scan, "status": "not_run_yet"},
+        }
+    try:
+        scan_status = json.loads(record.scan_status) if record.scan_status else {
+            "enabled": settings.dynamic_market_scan, "status": "not_run_yet",
+        }
+    except Exception:
+        scan_status = {"enabled": settings.dynamic_market_scan, "status": "unknown"}
     return {
         "active": json.loads(record.active_symbols),
         "benched": [
@@ -386,6 +407,7 @@ def roster(session=Depends(db), _=Depends(require_session)):
             for sym, until in json.loads(record.benched_symbols).items()
         ],
         "last_review": record.last_review,
+        "scan": scan_status,
     }
 
 
