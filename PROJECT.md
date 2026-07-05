@@ -278,18 +278,41 @@ Every 1h candle close, per symbol:
 
 1. **Stage 1** (`discover_market_universe`, cheap): one
    `adapter.fetch_all_tickers()` call (Binance `fetch_tickers()` with no
-   args, one request for every USDT-M perpetual). Filters:
-   stablecoin bases (`USDC`, `BUSD`, `TUSD`, `FDUSD`, `DAI`, `USDP`, `PYUSD`,
-   `USTC`, `EUR`, `GBP`, `GUSD`, `USDD`), leveraged-token markers (`UP`,
-   `DOWN`, `BULL`, `BEAR` in the base), `MARKET_SCAN_EXCLUDE_SYMBOLS`,
-   `quoteVolume < MARKET_SCAN_MIN_QUOTE_VOLUME`, spread over
-   `MARKET_SCAN_MAX_SPREAD_PCT` (skipped if the ticker has no bid/ask), and
-   anything that isn't a `.../USDT` perpetual (ccxt symbols like
-   `BTC/USDT:USDT` are normalized by stripping the `:USDT` settlement
-   suffix). Ranks by `volume_score*0.8 + momentum_score*0.2` (volume is the
-   real gate; momentum is a tiebreaker, not a reason to trade an illiquid
-   pump). Keeps top `MARKET_SCAN_TOP_N`; `MARKET_SCAN_FIXED_MAJORS` are
-   always prepended regardless of rank.
+   args, one request for every USDT-M perpetual). Filters, in order:
+   - stablecoin bases (`USDC`, `BUSD`, `TUSD`, `FDUSD`, `DAI`, `USDP`, `PYUSD`,
+     `USTC`, `EUR`, `GBP`, `GUSD`, `USDD`)
+   - leveraged-token markers (`UP`, `DOWN`, `BULL`, `BEAR` in the base)
+   - synthetic index/dominance products (`_is_index_product`: an explicit
+     denylist — `BTCDOM`, `ETHDOM`, `DEFI`, `ALTS`, `TOTAL`, `ALT` — plus
+     anything ending in `DOM`). **Found live in testing**: `BTCDOM/USDT`
+     (Binance's BTC-dominance index perpetual) cleared the volume filter
+     and got shortlisted despite not being a real coin at all — this
+     denylist plus the market-cap filter below both exclude it
+     independently, so it's caught even if one filter is disabled/down.
+   - `MARKET_SCAN_EXCLUDE_SYMBOLS`
+   - market-cap rank (see below)
+   - `quoteVolume < MARKET_SCAN_MIN_QUOTE_VOLUME`
+   - spread over `MARKET_SCAN_MAX_SPREAD_PCT` (skipped if the ticker has no
+     bid/ask)
+   - anything that isn't a `.../USDT` perpetual (ccxt symbols like
+     `BTC/USDT:USDT` are normalized by stripping the `:USDT` settlement
+     suffix)
+
+   Ranks by `volume_score*0.8 + momentum_score*0.2` (volume is the real
+   gate; momentum is a tiebreaker, not a reason to trade an illiquid pump).
+   Keeps top `MARKET_SCAN_TOP_N`; `MARKET_SCAN_FIXED_MAJORS` are always
+   prepended regardless of rank.
+
+   **Market-cap/rank filter** (`get_top_market_cap_symbols`,
+   `MARKET_SCAN_REQUIRE_MARKET_CAP_RANK`): a live scan found several
+   micro-cap tokens (`GUA`, `BAS`, `EPIC`, `MAGMA`, `AKE`, `ARPA`, `AT`,
+   `VELVET`) that technically cleared the $50M volume floor. Cross-checks
+   symbol bases against CoinGecko's top `MARKET_SCAN_MIN_MARKET_CAP_RANK`
+   coins by market cap (`/coins/markets`, free, no key, one request, cached
+   `MARKET_SCAN_MARKET_CAP_REFRESH_HOURS`). If that API call fails, the
+   filter is skipped for that cycle (logs a warning) rather than rejecting
+   every candidate — degrades to volume-only filtering, never blocks the
+   scan entirely.
 2. **Stage 2** (unchanged): only `CoinRoster.candidate_pool()`'s output ever
    reaches the full indicator/SMC/MTF/EV/risk-admission stack in
    `orchestrator.py`. The existing daily review (volume recheck, win-rate

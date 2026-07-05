@@ -3,12 +3,16 @@
 Two layers work together:
 
 1. Dynamic market scanner (stage 1, cheap): one fetch_all_tickers() call
-   across the whole exchange, filtered (stablecoins/leveraged tokens/excluded
-   symbols/min volume/max spread) and ranked (volume + momentum), kept to the
-   top N. This replaces the old fixed CANDIDATE_SYMBOLS list as the source of
+   across the whole exchange, filtered (stablecoins/leveraged tokens/
+   synthetic index-dominance products/excluded symbols/min volume/max
+   spread/market-cap rank) and ranked (volume + momentum), kept to the top
+   N. This replaces the old fixed CANDIDATE_SYMBOLS list as the source of
    *candidates* — it does not run any indicators/MTF/signal logic itself.
    Falls back to CANDIDATE_SYMBOLS if disabled, if the adapter doesn't
-   support it, or if the scan fails for any reason.
+   support it, or if the scan fails for any reason. The market-cap filter
+   (CoinGecko, free/no-key, top MARKET_SCAN_MIN_MARKET_CAP_RANK coins) keeps
+   micro-caps and index products like BTCDOM out even when they clear the
+   volume floor; it degrades to volume-only filtering if unavailable.
 
 2. Existing roster/bench logic (stage 2 gate, unchanged): every 24h, checks
    volume for active coins (drops illiquid), reviews win rate, benches on
@@ -27,6 +31,8 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone, timedelta
+
+import requests
 
 from agent.config.settings import settings
 
@@ -54,11 +60,70 @@ _STABLE_BASES = {
 }
 _LEVERAGED_MARKERS = ("UP", "DOWN", "BULL", "BEAR")
 
+# Defense-in-depth: known synthetic index/dominance products that trade as
+# regular-looking perpetuals but aren't real coins (e.g. BTCDOM tracks BTC's
+# share of total crypto market cap, not BTC itself). The market-cap filter
+# below already excludes these naturally (CoinGecko doesn't list them as
+# coins), but this denylist still applies even if that filter is disabled or
+# its API call fails, since these should never be traded by a per-coin
+# momentum/mean-reversion strategy regardless.
+_INDEX_PRODUCT_MARKERS = ("DOM",)
+_INDEX_PRODUCT_DENYLIST = {"BTCDOM", "ETHDOM", "DEFI", "ALTS", "TOTAL", "ALT"}
+
+# Module-level cache for the CoinGecko top-market-cap symbol set — market cap
+# ranking changes slowly, so this is refreshed on its own (long) cadence
+# independent of the ticker scan, and shared across CoinRoster instances.
+_market_cap_symbols: set[str] | None = None
+_market_cap_fetched_at: datetime | None = None
+
 
 def _normalize_futures_symbol(raw_symbol: str) -> str:
     """ccxt unified futures symbols look like 'BTC/USDT:USDT' — strip the
     settlement suffix to match this project's 'BTC/USDT' convention."""
     return raw_symbol.split(":", 1)[0]
+
+
+def _is_index_product(base: str) -> bool:
+    if base in _INDEX_PRODUCT_DENYLIST:
+        return True
+    return any(base.endswith(marker) for marker in _INDEX_PRODUCT_MARKERS)
+
+
+def get_top_market_cap_symbols(force: bool = False) -> set[str] | None:
+    """Fetches the top MARKET_SCAN_MIN_MARKET_CAP_RANK coins by market cap
+    from CoinGecko's free public API (no key required) and returns their
+    uppercased symbols. Cached for MARKET_SCAN_MARKET_CAP_REFRESH_HOURS.
+    Returns None (not an empty set) on any failure — callers must treat that
+    as "skip this filter", not "nothing passes"."""
+    global _market_cap_symbols, _market_cap_fetched_at
+
+    now = datetime.now(timezone.utc)
+    stale = (
+        _market_cap_fetched_at is None
+        or (now - _market_cap_fetched_at).total_seconds() >= settings.market_scan_market_cap_refresh_hours * 3600
+    )
+    if _market_cap_symbols is not None and not stale and not force:
+        return _market_cap_symbols
+
+    try:
+        per_page = min(max(settings.market_scan_min_market_cap_rank, 1), 250)
+        resp = requests.get(
+            settings.market_scan_market_cap_api_url,
+            params={"vs_currency": "usd", "order": "market_cap_desc", "per_page": per_page, "page": 1},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        rows = resp.json()
+        symbols = {str(r["symbol"]).upper() for r in rows if r.get("symbol")}
+        if not symbols:
+            raise ValueError("empty market cap response")
+        _market_cap_symbols = symbols
+        _market_cap_fetched_at = now
+        log.info(f"Market-cap filter refreshed: top {len(symbols)} coins by market cap")
+        return symbols
+    except Exception as e:
+        log.warning(f"Market-cap fetch failed, skipping that filter this cycle: {e}")
+        return _market_cap_symbols  # serve the last good cache if we have one, else None
 
 
 def discover_market_universe(adapter) -> tuple[list[str], dict]:
@@ -74,9 +139,15 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
         raise RuntimeError("fetch_all_tickers returned no data")
 
     exclude = {s.strip().upper() for s in settings.market_scan_exclude_symbols.split(",") if s.strip()}
+    market_cap_symbols = (
+        get_top_market_cap_symbols() if settings.market_scan_require_market_cap_rank else None
+    )
+    if settings.market_scan_require_market_cap_rank and market_cap_symbols is None:
+        log.warning("Market-cap filter enabled but unavailable this cycle — falling back to volume-only filtering")
+
     rejected = {
-        "not_usdt_perp": 0, "stablecoin": 0, "leveraged": 0,
-        "excluded": 0, "low_volume": 0, "wide_spread": 0, "bad_data": 0,
+        "not_usdt_perp": 0, "stablecoin": 0, "leveraged": 0, "index_product": 0,
+        "excluded": 0, "low_volume": 0, "wide_spread": 0, "bad_data": 0, "not_top_market_cap": 0,
     }
 
     candidates = []
@@ -93,8 +164,14 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
         if any(marker in base for marker in _LEVERAGED_MARKERS):
             rejected["leveraged"] += 1
             continue
+        if _is_index_product(base):
+            rejected["index_product"] += 1
+            continue
         if symbol.upper() in exclude:
             rejected["excluded"] += 1
+            continue
+        if market_cap_symbols is not None and base not in market_cap_symbols:
+            rejected["not_top_market_cap"] += 1
             continue
 
         quote_volume = ticker.get("quoteVolume")

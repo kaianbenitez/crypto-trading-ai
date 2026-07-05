@@ -90,6 +90,17 @@ class Settings:
     market_scan_include_fixed_majors: bool = os.getenv("MARKET_SCAN_INCLUDE_FIXED_MAJORS", "true").lower() == "true"
     market_scan_fixed_majors: str = os.getenv("MARKET_SCAN_FIXED_MAJORS", "BTC/USDT,ETH/USDT,SOL/USDT,XRP/USDT,ADA/USDT")
 
+    # Market-cap/rank filter (CoinGecko, free/no-key) — excludes micro-caps and
+    # synthetic index/dominance products (e.g. BTCDOM) that can pass a pure
+    # volume filter but aren't real coins or aren't established enough to
+    # trust. Degrades to volume-only filtering if the API is unavailable.
+    market_scan_require_market_cap_rank: bool = os.getenv("MARKET_SCAN_REQUIRE_MARKET_CAP_RANK", "true").lower() == "true"
+    market_scan_min_market_cap_rank: int = int(os.getenv("MARKET_SCAN_MIN_MARKET_CAP_RANK", "200"))
+    market_scan_market_cap_api_url: str = os.getenv(
+        "MARKET_SCAN_MARKET_CAP_API_URL", "https://api.coingecko.com/api/v3/coins/markets"
+    )
+    market_scan_market_cap_refresh_hours: int = int(os.getenv("MARKET_SCAN_MARKET_CAP_REFRESH_HOURS", "12"))
+
     # Extra cost/edge gates layered on top of MIN_EDGE_AFTER_COST_R — these
     # add rejection criteria only, they never change position size.
     max_estimated_cost_r: float = float(os.getenv("MAX_ESTIMATED_COST_R", "0.20"))

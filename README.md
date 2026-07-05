@@ -99,9 +99,17 @@ admission) still only ever runs on a short, curated list:
 
 1. **Stage 1 (cheap)** — one `fetch_tickers()` call across every USDT-M
    perpetual on the exchange. Filters out stablecoins, leveraged tokens,
-   configured exclusions, symbols under `MARKET_SCAN_MIN_QUOTE_VOLUME`, and
-   spreads over `MARKET_SCAN_MAX_SPREAD_PCT`; ranks the rest by volume
-   (80%) + momentum (20%); keeps the top `MARKET_SCAN_TOP_N`.
+   synthetic index/dominance products (e.g. `BTCDOM` — Binance's BTC
+   dominance perpetual slipped past the volume filter in initial testing,
+   hence the dedicated check), configured exclusions, symbols under
+   `MARKET_SCAN_MIN_QUOTE_VOLUME`, spreads over `MARKET_SCAN_MAX_SPREAD_PCT`,
+   and (if `MARKET_SCAN_REQUIRE_MARKET_CAP_RANK=true`) anything outside
+   CoinGecko's top `MARKET_SCAN_MIN_MARKET_CAP_RANK` coins by market cap —
+   several micro-caps (`GUA`, `BAS`, `EPIC`, etc.) cleared the raw volume
+   floor in testing despite being obscure, so this cross-check keeps the
+   scanner to established coins even during a volume spike; degrades to
+   volume-only filtering if that free API call fails. Ranks the rest by
+   volume (80%) + momentum (20%); keeps the top `MARKET_SCAN_TOP_N`.
    `MARKET_SCAN_FIXED_MAJORS` are always included regardless of ranking.
 2. **Stage 2 (unchanged)** — only the shortlisted symbols ever reach the
    full strategy stack; the existing 24h roster review (volume recheck,
