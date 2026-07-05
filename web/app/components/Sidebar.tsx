@@ -40,6 +40,7 @@ const NAV_ITEMS = [
   { label: "Risk",       href: "/risk" },
   { label: "Adaptive",   href: "/adaptive" },
   { label: "Settings",   href: "/settings" },
+  { label: "Changelog",  href: "/changelog" },
 ];
 
 export default function Sidebar() {

@@ -264,6 +264,10 @@ export interface NewsStatus {
   api_url: string;
 }
 
+export interface Changelog {
+  markdown: string;
+}
+
 export interface AgentStatus {
   trading_agent: string;
   webapi: string;
@@ -296,6 +300,7 @@ export const api = {
   adaptiveActivity: (limit = 50) => request<AdaptiveActivityEntry[]>(`/api/adaptive-activity?limit=${limit}`),
   roster: () => request<RosterInfo>("/api/roster"),
   newsStatus: () => request<NewsStatus>("/api/news-status"),
+  changelog: () => request<Changelog>("/api/changelog"),
   candles: (symbol: string, timeframe = "1h", limit = 120) =>
     request<CandlePayload>(`/api/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
   setKillSwitch: (active: boolean, reason?: string) =>

@@ -3,6 +3,7 @@ import json
 import subprocess
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, Depends, Response, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -211,6 +212,19 @@ def news_status(_=Depends(require_session)):
         "provider": settings.news_provider,
         "api_url": settings.news_api_url,
     }
+
+
+_CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+
+
+@app.get("/api/changelog")
+def changelog(_=Depends(require_session)):
+    """Raw contents of the repo's CHANGELOG.md for the dashboard's Changelog page."""
+    try:
+        text = _CHANGELOG_PATH.read_text(encoding="utf-8")
+    except OSError:
+        text = "# Changelog\n\nNo changelog file found."
+    return {"markdown": text}
 
 
 @app.get("/api/open-positions-detail")
