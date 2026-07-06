@@ -35,6 +35,7 @@ const SERVICE_LIST: { name: string; key: keyof AgentStatus }[] = [
 
 const NAV_ITEMS = [
   { label: "Dashboard",  href: "/" },
+  { label: "Live Log",   href: "/log" },
   { label: "Journal",    href: "/journal" },
   { label: "Coin Watch", href: "/coins" },
   { label: "Risk",       href: "/risk" },

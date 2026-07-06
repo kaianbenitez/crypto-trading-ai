@@ -2,14 +2,14 @@ import asyncio
 import json
 import subprocess
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, Response, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from agent.config.settings import settings
-from agent.db.models import get_session, Trade, PerCoinBrainState, ParamChangeLog, TrailingStopEvent, CoinDigest, RosterState
+from agent.db.models import get_session, Trade, PerCoinBrainState, ParamChangeLog, TrailingStopEvent, CoinDigest, RosterState, SignalGateEvent, AgentActivityLog
 from agent.exchange.binance_futures import BinanceFuturesAdapter
 from agent.dashboard.candlestick_panel import build_candlestick_payload
 from agent.dashboard.plain_english import simplify_lines
@@ -396,6 +396,74 @@ def adaptive_activity(limit: int = 50, session=Depends(db), _=Depends(require_se
         for e in trail_events
     ]
     return sorted(rows, key=lambda r: r["created_at"], reverse=True)[:safe_limit]
+
+
+_GATE_WINDOWS = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
+
+# Human-friendly labels for the gate keys the agent writes.
+_GATE_LABELS = {
+    "no_signal":    "No signal (TA/regime/structure)",
+    "mtf":          "Multi-timeframe confluence",
+    "cost_edge":    "Cost / edge floor",
+    "reentry":      "Re-entry cooldown/gate",
+    "memory":       "Memory (past-loss)",
+    "risk_cap":     "Risk / admission caps",
+    "leg_disabled": "Strategy leg disabled",
+}
+
+
+@app.get("/api/gate-stats")
+def gate_stats(window: str = "24h", session=Depends(db), _=Depends(require_session)):
+    """Counts of candidate rejections per decision gate over a time window,
+    so we can see which gate rejects the most trades and tune thresholds from
+    data. Observability only — reads what the agent recorded."""
+    delta = _GATE_WINDOWS.get(window, _GATE_WINDOWS["24h"])
+    since = datetime.now(timezone.utc).replace(tzinfo=None) - delta
+    rows = (
+        session.query(SignalGateEvent)
+        .filter(SignalGateEvent.created_at >= since)
+        .all()
+    )
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r.gate] = counts.get(r.gate, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    return {
+        "window": window if window in _GATE_WINDOWS else "24h",
+        "total": sum(counts.values()),
+        "gates": [
+            {"gate": g, "label": _GATE_LABELS.get(g, g), "count": c}
+            for g, c in ranked
+        ],
+    }
+
+
+@app.get("/api/activity-log")
+def activity_log(limit: int = 200, since: str | None = None, session=Depends(db), _=Depends(require_session)):
+    """The agent's per-cycle decision notes (same content it logs to
+    journalctl), newest first. Optional `since` is an ISO timestamp."""
+    safe_limit = max(1, min(limit, 1000))
+    q = session.query(AgentActivityLog)
+    if since:
+        try:
+            ts = datetime.fromisoformat(since.replace("Z", "+00:00"))
+            if ts.tzinfo is not None:
+                ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+            q = q.filter(AgentActivityLog.created_at > ts)
+        except ValueError:
+            pass
+    rows = q.order_by(AgentActivityLog.id.desc()).limit(safe_limit).all()
+    return [
+        {
+            "id": r.id,
+            "cycle": r.cycle,
+            "symbol": r.symbol,
+            "level": r.level,
+            "message": r.message,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
 
 
 @app.get("/api/roster")

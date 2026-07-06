@@ -3,6 +3,29 @@
 All notable changes to this project are logged here, most recent first.
 Format is informal — one entry per meaningful change, not strict Keep a Changelog.
 
+## 2026-07-07
+
+- **Added decision-log observability (no strategy/signal changes).** The agent
+  already built a per-cycle `signal_summary` (why each coin did/didn't trade)
+  but only logged it to journalctl. Now that same content is persisted and
+  exposed over the API so the dashboard can show *why the bot looks idle*:
+  - Two new additive tables — `signal_gate_events` (one row per candidate
+    rejected at a gate: `no_signal`/`mtf`/`memory`/`cost_edge`/`reentry`/
+    `risk_cap`/`leg_disabled`) and `agent_activity_log` (every decision note).
+    Both are pruned to a rolling window (activity: 7d/5k rows; gates: 30d).
+  - `GET /api/gate-stats?window=24h|7d|30d` — rejection counts per gate,
+    ranked, so thresholds can be tuned from data instead of guesswork.
+    **No thresholds were changed** — this round is observability only.
+  - `GET /api/activity-log?limit=&since=` — the decision feed, newest first.
+  - New "Live Log" tab in the dashboard: a why-idle summary strip (top
+    rejection reasons over 24h/7d/30d) plus an auto-refreshing, filterable
+    (by symbol and level) feed of the agent's per-cycle decisions.
+  - The entry/exit path is byte-for-byte unchanged: the 10 rejection sites
+    just route their existing log line through one `record()` sink that also
+    captures a structured row; writes/pruning happen once per cycle, wrapped
+    in try/except so a DB hiccup can never disturb trading.
+  - New smoke test `tests/smoke_activity_log.py`.
+
 ## 2026-07-06
 
 - **Made the dashboard mobile-responsive (iPhone 13 and similar).** The sidebar

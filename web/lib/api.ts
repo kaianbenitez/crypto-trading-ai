@@ -269,6 +269,27 @@ export interface Changelog {
   markdown: string;
 }
 
+export interface ActivityLogEntry {
+  id: number;
+  cycle: number | null;
+  symbol: string | null;
+  level: string | null;   // open | candidate | block | info
+  message: string;
+  created_at: string;
+}
+
+export interface GateStat {
+  gate: string;
+  label: string;
+  count: number;
+}
+
+export interface GateStats {
+  window: string;
+  total: number;
+  gates: GateStat[];
+}
+
 export interface AgentStatus {
   trading_agent: string;
   webapi: string;
@@ -302,6 +323,10 @@ export const api = {
   roster: () => request<RosterInfo>("/api/roster"),
   newsStatus: () => request<NewsStatus>("/api/news-status"),
   changelog: () => request<Changelog>("/api/changelog"),
+  activityLog: (limit = 200, since?: string) =>
+    request<ActivityLogEntry[]>(`/api/activity-log?limit=${limit}${since ? `&since=${encodeURIComponent(since)}` : ""}`),
+  gateStats: (window: "24h" | "7d" | "30d" = "24h") =>
+    request<GateStats>(`/api/gate-stats?window=${window}`),
   candles: (symbol: string, timeframe = "1h", limit = 120) =>
     request<CandlePayload>(`/api/candles/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`),
   setKillSwitch: (active: boolean, reason?: string) =>

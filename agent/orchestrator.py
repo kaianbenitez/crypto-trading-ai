@@ -27,7 +27,7 @@ from agent.adapt.postmortem import generate_postmortem
 from agent.adapt.tuner import tune_parameters, diff_params
 from agent.config.settings import settings
 from agent.backtest.engine import SimpleSettings
-from agent.db.models import Trade, get_session
+from agent.db.models import Trade, get_session, SignalGateEvent, AgentActivityLog
 from agent.exchange.binance_futures import BinanceFuturesAdapter
 from agent.exchange.bybit_futures import BybitFuturesAdapter
 from agent.fundamental.market_context import add_market_context
@@ -460,6 +460,98 @@ def _persist_risk_day_state(session, risk):
         session.commit()
     except Exception as e:
         log.warning(f"Could not persist daily risk state: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Decision-log persistence (observability only — never influences trading).
+# Mirrors the per-cycle `signal_summary` lines into agent_activity_log, and
+# every gate rejection into signal_gate_events, so the API/dashboard can show
+# which gate is rejecting the most trades.
+# ---------------------------------------------------------------------------
+
+# Rolling retention: activity log is high-volume chat, gate events feed a
+# 30-day stats window so they're kept longer.
+_ACTIVITY_MAX_ROWS = 5000
+_ACTIVITY_MAX_DAYS = 7
+_GATE_MAX_DAYS = 30
+_GATE_MAX_ROWS = 50000
+
+
+def _flush_decision_log(session, cycle: int, activity_events: list[dict], gate_events: list[dict]):
+    """Batch-write this cycle's notes. Best-effort: a failure here must never
+    disturb the trading loop, so we swallow and roll back on any error."""
+    if not activity_events and not gate_events:
+        return
+    ts = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        for ev in activity_events:
+            session.add(AgentActivityLog(
+                cycle=cycle,
+                symbol=ev.get("symbol"),
+                level=ev.get("level") or "info",
+                message=ev.get("message") or "",
+                created_at=ts,
+            ))
+        for ev in gate_events:
+            session.add(SignalGateEvent(
+                symbol=ev.get("symbol") or "?",
+                gate=ev.get("gate") or "unknown",
+                reason=ev.get("reason"),
+                side=ev.get("side"),
+                confidence=ev.get("confidence"),
+                created_at=ts,
+            ))
+        session.commit()
+    except Exception as e:
+        log.warning(f"Could not persist decision log: {e}")
+        try:
+            session.rollback()
+        except Exception:
+            pass
+
+
+def _prune_decision_log(session):
+    """Keep the observability tables bounded. Cheap enough to run periodically
+    (called every N cycles, not every cycle)."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        # --- agent_activity_log: last 7 days, then cap to newest 5000 rows ---
+        session.query(AgentActivityLog).filter(
+            AgentActivityLog.created_at < now - timedelta(days=_ACTIVITY_MAX_DAYS)
+        ).delete(synchronize_session=False)
+        cutoff = (
+            session.query(AgentActivityLog.id)
+            .order_by(AgentActivityLog.id.desc())
+            .offset(_ACTIVITY_MAX_ROWS)
+            .first()
+        )
+        if cutoff:
+            session.query(AgentActivityLog).filter(
+                AgentActivityLog.id <= cutoff[0]
+            ).delete(synchronize_session=False)
+
+        # --- signal_gate_events: last 30 days (feeds the 30d stats window) ---
+        session.query(SignalGateEvent).filter(
+            SignalGateEvent.created_at < now - timedelta(days=_GATE_MAX_DAYS)
+        ).delete(synchronize_session=False)
+        cutoff_g = (
+            session.query(SignalGateEvent.id)
+            .order_by(SignalGateEvent.id.desc())
+            .offset(_GATE_MAX_ROWS)
+            .first()
+        )
+        if cutoff_g:
+            session.query(SignalGateEvent).filter(
+                SignalGateEvent.id <= cutoff_g[0]
+            ).delete(synchronize_session=False)
+        session.commit()
+    except Exception as e:
+        log.warning(f"Could not prune decision log: {e}")
+        try:
+            session.rollback()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -1019,7 +1111,23 @@ def run():
         new_candle_this_cycle = False
         opened_this_cycle = False
         signal_summary = []
+        activity_events: list[dict] = []   # -> agent_activity_log
+        gate_events: list[dict] = []       # -> signal_gate_events (rejections)
         entry_candidates: list[EntryCandidate] = []
+
+        # Single sink for per-cycle decision notes: preserves the existing
+        # `signal_summary` log lines verbatim AND captures structured rows for
+        # the observability tables. Pure logging — no control-flow effect.
+        def record(symbol, message, *, gate=None, level=None, side=None, confidence=None):
+            signal_summary.append(f"{symbol}: {message}")
+            if level is None:
+                level = "block" if (gate and gate != "no_signal") else "info"
+            activity_events.append({"symbol": symbol, "message": message, "level": level})
+            if gate:
+                gate_events.append({
+                    "symbol": symbol, "gate": gate, "reason": message,
+                    "side": side, "confidence": confidence,
+                })
 
         for symbol, state in list(states.items()):
             try:
@@ -1075,7 +1183,8 @@ def run():
                     disabled_legs = PerCoinBrain(session, symbol).disabled_legs()
                     if signal.strategy_name in disabled_legs:
                         log.info(f"[{symbol}] {signal.strategy_name} disabled by per-coin brain")
-                        signal_summary.append(f"{symbol}: {signal.strategy_name} disabled by per-coin brain")
+                        record(symbol, f"{signal.strategy_name} disabled by per-coin brain",
+                               gate="leg_disabled", side=signal.side.value, confidence=signal.confidence)
                         state.last_candle = now_candle
                         continue
                 except Exception as e:
@@ -1107,7 +1216,8 @@ def run():
 
                             if not mtf["approved"]:
                                 log.info(f"[{symbol}] {signal.side.value.upper()} conf={signal.confidence:.2f} → MTF blocked: {mtf['block_reason']}")
-                                signal_summary.append(f"{symbol}: {signal.side.value.upper()} blocked by MTF (score={mtf['weighted_score']:.0f})")
+                                record(symbol, f"{signal.side.value.upper()} blocked by MTF (score={mtf['weighted_score']:.0f})",
+                                       gate="mtf", side=signal.side.value, confidence=signal.confidence)
                                 state.last_candle = now_candle
                                 continue
 
@@ -1132,7 +1242,7 @@ def run():
 
                     if signal.confidence <= 0:
                         log.info(f"[{symbol}] Memory reduced confidence to zero — skipping")
-                        signal_summary.append(f"{symbol}: killed by memory")
+                        record(symbol, "killed by memory", gate="memory", side=signal.side.value, confidence=signal.confidence)
                         state.last_candle = now_candle
                         continue
 
@@ -1204,7 +1314,7 @@ def run():
                                 f"(estimated costs {cost_r:.2f}R)"
                             )
                             log.info(f"[{symbol}] {reason} - skipping")
-                            signal_summary.append(f"{symbol}: {reason}")
+                            record(symbol, reason, gate="cost_edge", side=signal.side.value, confidence=signal.confidence)
                             state.last_candle = now_candle
                             continue
 
@@ -1218,7 +1328,8 @@ def run():
                         gate_reason = _cost_edge_gate(cost_metrics, cost_r)
                         if gate_reason:
                             log.info(f"[{symbol}] Cost/edge gate: {gate_reason} - skipping")
-                            signal_summary.append(f"{symbol}: cost/edge gate ({gate_reason})")
+                            record(symbol, f"cost/edge gate ({gate_reason})",
+                                   gate="cost_edge", side=signal.side.value, confidence=signal.confidence)
                             state.last_candle = now_candle
                             continue
 
@@ -1232,21 +1343,25 @@ def run():
                     )
                     if not reentry.allowed:
                         log.info(f"[{symbol}] Re-entry blocked: {reentry.reason}")
-                        signal_summary.append(f"{symbol}: re-entry blocked ({reentry.reason})")
+                        record(symbol, f"re-entry blocked ({reentry.reason})",
+                               gate="reentry", side=signal.side.value, confidence=signal.confidence)
                         state.last_candle = now_candle
                         continue
 
                     score = _candidate_score(signal)
                     signal.indicator_snapshot["candidate_score"] = score
                     entry_candidates.append(EntryCandidate(symbol, state, signal, row, trade_params, score))
-                    signal_summary.append(
-                        f"{symbol}: candidate {signal.side.value.upper()} "
-                        f"score={score:.2f} EV={float(signal.indicator_snapshot.get('mtf_ev') or 0):.2f}R"
+                    record(
+                        symbol,
+                        f"candidate {signal.side.value.upper()} "
+                        f"score={score:.2f} EV={float(signal.indicator_snapshot.get('mtf_ev') or 0):.2f}R",
+                        level="candidate",
                     )
                 else:
                     reason = signal.reasoning[0] if signal.reasoning else "no signal"
                     log.info(f"[{symbol}] No signal — {reason}")
-                    signal_summary.append(f"{symbol}: {reason[:60]}")
+                    record(symbol, reason[:60], gate="no_signal", level="info",
+                           side=signal.side.value, confidence=signal.confidence)
 
                 state.last_candle = now_candle
 
@@ -1279,13 +1394,17 @@ def run():
                 )
                 if opened:
                     opened_this_cycle = True
-                    signal_summary.append(
-                        f"{candidate.symbol}: {candidate.signal.side.value.upper()} OPENED "
-                        f"(ranked score={candidate.score:.2f})"
+                    record(
+                        candidate.symbol,
+                        f"{candidate.signal.side.value.upper()} OPENED (ranked score={candidate.score:.2f})",
+                        level="open",
                     )
                 else:
-                    signal_summary.append(
-                        f"{candidate.symbol}: ranked candidate rejected by risk/admission caps"
+                    record(
+                        candidate.symbol,
+                        "ranked candidate rejected by risk/admission caps",
+                        gate="risk_cap", side=candidate.signal.side.value,
+                        confidence=candidate.signal.confidence,
                     )
 
         # --- Self-awareness: candle summary ---
@@ -1316,6 +1435,11 @@ def run():
                     f"Macro: {macro.regime} | F&G: {macro.fear_greed} | Funding: {macro.funding_rate_pct:+.1f}%\n"
                     f"Most common block: check journalctl for signal summaries"
                 )
+
+        # --- Persist this cycle's decision notes (observability only) ---
+        _flush_decision_log(session, cycle, activity_events, gate_events)
+        if cycle % 30 == 0:
+            _prune_decision_log(session)
 
         # Heartbeat every 6 cycles (~6 min)
         if cycle % 6 == 0:

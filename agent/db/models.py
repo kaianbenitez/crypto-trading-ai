@@ -222,6 +222,43 @@ class CoinDigest(Base):
         return json.loads(self.headlines) if self.headlines else []
 
 
+class SignalGateEvent(Base):
+    """One row per candidate rejected at a decision gate in the main loop.
+
+    Pure observability — written alongside the existing per-cycle
+    `signal_summary` lines, never used to make a trading decision. Lets us
+    see which gate rejects the most trades so thresholds can be tuned from
+    data rather than guesswork.
+    """
+    __tablename__ = "signal_gate_events"
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    # gate: leg_disabled | mtf | memory | cost_edge | reentry | risk_cap | no_signal
+    # (regime/context/smc rejections fold into the `no_signal` reason text,
+    #  since they're internal to signal generation, not separate loop stages)
+    gate = Column(String, nullable=False, index=True)
+    reason = Column(Text, nullable=True)
+    side = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class AgentActivityLog(Base):
+    """Persisted copy of every per-cycle `signal_summary` line — the same
+    content the agent already logs to journalctl, but queryable over the API
+    so the dashboard can show why the bot "looks idle." Pruned to a rolling
+    window; additive and safe to drop/recreate."""
+    __tablename__ = "agent_activity_log"
+
+    id = Column(Integer, primary_key=True)
+    cycle = Column(Integer, nullable=True)
+    symbol = Column(String, nullable=True, index=True)
+    level = Column(String, nullable=True)   # open | candidate | block | info
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 def _run_lightweight_migrations(engine) -> None:
     """create_all() only creates brand-new tables — it never ALTERs existing
     ones. Any column added to an existing model after the table was first
