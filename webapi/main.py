@@ -123,6 +123,7 @@ def summary(session=Depends(db), _=Depends(require_session)):
         total_trades=len(trades),
         win_rate_pct=(len(wins) / len(trades) * 100) if trades else 0.0,
         roi_pct=(total_pnl / settings.bankroll_usdt * 100) if settings.bankroll_usdt else 0.0,
+        total_pnl_usdt=total_pnl,
         open_positions=open_count,
         kill_switch_active=state.kill_switch_active,
         bankroll_usdt=settings.bankroll_usdt,

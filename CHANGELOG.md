@@ -5,6 +5,17 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-06
 
+- **Fixed dashboard/journal "Realized P&L" summing only the last N trades.**
+  The main dashboard fetched only the last 15 trades (`api.trades(15)`) and
+  summed `pnl_usdt` across whichever of those were closed, instead of the
+  true all-time total — so once there were more than ~15 closed trades, the
+  stat card silently diverged from reality (in one case showing negative
+  while the actual all-time total was positive). The Journal page had the
+  same bug at a 100-trade cap. Backend's `/api/summary` already computed the
+  correct total-trades/win-rate over *all* closed trades but never returned
+  the raw PnL dollar figure — added `total_pnl_usdt` to that response and
+  pointed both pages at it instead of re-summing a capped trade fetch.
+
 - **Fixed realized PnL understatement on partial fills.** When a TP order filled
   only part of a position, `trade.qty` was reduced to the remaining size (needed
   for correctly sizing the trailing stop / force-close), but the final PnL

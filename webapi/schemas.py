@@ -45,6 +45,7 @@ class SummaryOut(BaseModel):
     total_trades: int
     win_rate_pct: float
     roi_pct: float
+    total_pnl_usdt: float
     open_positions: int
     kill_switch_active: bool
     bankroll_usdt: float

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AuthGate from "../components/AuthGate";
 import Sidebar from "../components/Sidebar";
-import { api, Trade, TradeNarrative } from "@/lib/api";
+import { api, Summary, Trade, TradeNarrative } from "@/lib/api";
 
 const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const price = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
@@ -148,12 +148,14 @@ function JournalContent() {
   const highlightId = searchParams.get("trade") ? Number(searchParams.get("trade")) : null;
 
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
   useEffect(() => {
     api.trades(100).then(setTrades).catch(() => setError("Could not load trades"));
+    api.summary().then(setSummary).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -165,6 +167,12 @@ function JournalContent() {
   }, [highlightId, trades.length]);
 
   const stats = useMemo(() => {
+    // Prefer the backend's all-time totals (summary) — trades is capped at
+    // the last 100 fetched, so summing it directly would silently disagree
+    // with the true total once there are more than 100 closed trades.
+    if (summary) {
+      return { closed: summary.total_trades, pnl: summary.total_pnl_usdt, winRate: summary.win_rate_pct };
+    }
     const closed = trades.filter(t => t.closed_at);
     const pnl = closed.reduce((sum, t) => sum + (t.pnl_usdt || 0), 0);
     const wins = closed.filter(t => (t.pnl_usdt || 0) > 0).length;
@@ -173,7 +181,7 @@ function JournalContent() {
       pnl,
       winRate: closed.length ? (wins / closed.length) * 100 : 0,
     };
-  }, [trades]);
+  }, [trades, summary]);
 
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>

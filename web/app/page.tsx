@@ -529,7 +529,11 @@ function Dashboard() {
   const killActive   = summary?.kill_switch_active;
   const regime       = status?.macro_regime || "normal";
   const regimeMeta   = REGIME_META[regime] || { label: regime, color: "var(--muted)" };
-  const totalPnl     = closedTrades.reduce((sum, t) => sum + (t.pnl_usdt ?? 0), 0);
+  // summary.total_pnl_usdt is authoritative (computed over ALL closed trades
+  // server-side). closedTrades is only the last-15-trades fetch used for the
+  // recent-activity list, so summing it here would silently disagree with
+  // the true all-time total whenever there are more than ~15 closed trades.
+  const totalPnl     = summary?.total_pnl_usdt ?? closedTrades.reduce((sum, t) => sum + (t.pnl_usdt ?? 0), 0);
 
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex" }}>
@@ -586,7 +590,7 @@ function Dashboard() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 18 }}>
           <StatCard label="Bankroll" value={summary ? `$${money.format(summary.bankroll_usdt)}` : "—"} sub="USDT balance" loading={loading} accent="var(--accent)" />
           <StatCard label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub="all-time" loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />
-          <StatCard label="Realized P&L" value={closedTrades.length ? `${totalPnl >= 0 ? "+" : ""}$${money.format(totalPnl)}` : "—"} color={pnlColor(totalPnl)} sub={`${closedTrades.length} closed trades`} loading={loading} accent={pnlColor(totalPnl)} />
+          <StatCard label="Realized P&L" value={summary ? `${totalPnl >= 0 ? "+" : ""}$${money.format(totalPnl)}` : "—"} color={pnlColor(totalPnl)} sub={summary ? `${summary.total_trades} closed trades` : undefined} loading={loading} accent={pnlColor(totalPnl)} />
           <StatCard label="Win Rate" value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"} sub={summary ? `${summary.total_trades} total` : undefined} loading={loading} accent={summary ? (summary.win_rate_pct >= 50 ? "var(--green)" : "var(--amber)") : undefined} />
           <StatCard label="Open" value={summary ? String(summary.open_positions) : "—"} color={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} sub="positions" loading={loading} accent={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} />
           <StatCard label="Macro" value={regimeMeta.label} color={regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regimeMeta.color} />

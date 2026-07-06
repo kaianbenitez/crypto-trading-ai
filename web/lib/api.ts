@@ -133,6 +133,7 @@ export interface Summary {
   total_trades: number;
   win_rate_pct: number;
   roi_pct: number;
+  total_pnl_usdt: number;
   open_positions: number;
   kill_switch_active: boolean;
   bankroll_usdt: number;
