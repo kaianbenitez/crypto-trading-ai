@@ -66,9 +66,9 @@ function AdaptiveContent() {
   }, []);
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
+    <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
       <Sidebar />
-      <main style={{ flex: 1, minWidth: 0, maxWidth: 1200, margin: "0 auto", padding: "28px 28px 60px" }}>
+      <main className="page-main" style={{ flex: 1, minWidth: 0, maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ marginBottom: 18 }}>
           <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Adaptive</h1>
           <p style={{ color: "var(--muted)", fontSize: 12, margin: "4px 0 0" }}>

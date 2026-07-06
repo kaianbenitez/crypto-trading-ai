@@ -407,14 +407,14 @@ function KillSwitchButton({ killActive, toggling, confirming, onHalt, onConfirm,
   cancelRef: React.RefObject<HTMLButtonElement | null>;
 }) {
   if (confirming) return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
       <span style={{ color: "var(--muted)", fontSize: 12 }}>Confirm halt?</span>
       <button onClick={onConfirm} disabled={toggling} aria-label="Confirm halt"
-        style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.5)", color: "var(--red)", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+        style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.5)", color: "var(--red)", borderRadius: 8, padding: "11px 16px", minHeight: 44, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
         Yes, halt
       </button>
       <button ref={cancelRef} onClick={onCancel} aria-label="Cancel"
-        style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", borderRadius: 8, padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+        style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", borderRadius: 8, padding: "11px 16px", minHeight: 44, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
         Cancel
       </button>
     </div>
@@ -422,14 +422,14 @@ function KillSwitchButton({ killActive, toggling, confirming, onHalt, onConfirm,
 
   if (killActive) return (
     <button onClick={onResume} disabled={toggling} aria-label="Resume trading"
-      style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.4)", color: "var(--red)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+      style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.4)", color: "var(--red)", borderRadius: 8, padding: "11px 18px", minHeight: 44, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
       <span style={{ fontSize: 10 }}>▶</span> {toggling ? "Resuming…" : "Resume trading"}
     </button>
   );
 
   return (
     <button onClick={onHalt} disabled={toggling} aria-label="Halt new entries"
-      style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", borderRadius: 8, padding: "8px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+      style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", borderRadius: 8, padding: "11px 18px", minHeight: 44, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
       <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--red)", display: "inline-block" }} />
       {toggling ? "Halting…" : "Halt entries"}
     </button>
@@ -536,7 +536,7 @@ function Dashboard() {
   const totalPnl     = summary?.total_pnl_usdt ?? closedTrades.reduce((sum, t) => sum + (t.pnl_usdt ?? 0), 0);
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex" }}>
+    <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex" }}>
       <Sidebar />
       <div style={{ flex: 1, minWidth: 0 }}>
 
@@ -548,7 +548,7 @@ function Dashboard() {
         </div>
       )}
 
-      <main style={{ maxWidth: 1560, margin: "0 auto", padding: "28px 28px 60px" }}>
+      <main className="page-main" style={{ maxWidth: 1560, margin: "0 auto" }}>
 
         {/* Header row */}
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>

@@ -25,22 +25,22 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-900 p-8">
+    <div className="flex min-h-[100dvh] items-center justify-center bg-zinc-950 px-4">
+      <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
         <h1 className="mb-6 text-xl font-semibold text-zinc-100">Crypto Trading AI</h1>
         <input
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="mb-4 w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-zinc-100"
+          className="mb-4 w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-3 text-base text-zinc-100"
           autoFocus
         />
         {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded bg-emerald-600 px-3 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="w-full rounded bg-emerald-600 px-3 py-3 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
         >
           {loading ? "Signing in..." : "Sign in"}
         </button>

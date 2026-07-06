@@ -184,9 +184,9 @@ function JournalContent() {
   }, [trades, summary]);
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
+    <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
       <Sidebar />
-      <main style={{ flex: 1, minWidth: 0, maxWidth: 1560, margin: "0 auto", padding: "28px 28px 60px" }}>
+      <main className="page-main" style={{ flex: 1, minWidth: 0, maxWidth: 1560, margin: "0 auto" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 18 }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Trade Journal</h1>

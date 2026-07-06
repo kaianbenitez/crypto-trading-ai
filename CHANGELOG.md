@@ -5,6 +5,26 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-06
 
+- **Made the dashboard mobile-responsive (iPhone 13 and similar).** The sidebar
+  was a fixed 200px column with no responsive handling at all, so on a phone
+  it ate over half the screen width permanently. Added:
+  - A shared `.app-shell`/`.page-main` responsive shell (breakpoint 860px,
+    matching the existing journal breakpoint) applied across all 7 pages.
+  - Sidebar now collapses into a top bar + slide-in drawer on narrow
+    viewports (hamburger toggle, backdrop-click/Escape-to-close, body-scroll
+    lock while open, closes automatically on navigation).
+  - `viewport-fit=cover` + `env(safe-area-inset-*)` padding for the iPhone
+    notch/home-indicator safe areas.
+  - Nav links and the kill-switch controls (halt/resume/confirm — the most
+    safety-critical control per PRODUCT.md) bumped to 44px minimum touch
+    targets.
+  - Login page: added horizontal edge padding and bumped input/button touch
+    targets for narrow screens.
+  Note: Turbopack dev server reliably OOMs in this sandbox (confirmed
+  repeatedly across sessions), so this was verified via `tsc --noEmit` +
+  `eslint` + manual structural review rather than a live browser render —
+  please sanity-check on your actual iPhone 13 after deploying.
+
 - **Fixed dashboard/journal "Realized P&L" summing only the last N trades.**
   The main dashboard fetched only the last 15 trades (`api.trades(15)`) and
   summed `pnl_usdt` across whichever of those were closed, instead of the
