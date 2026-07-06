@@ -43,6 +43,8 @@ const NAV_ITEMS = [
   { label: "Changelog",  href: "/changelog" },
 ];
 
+const MLB_URL = "/mlb/";
+
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -105,6 +107,22 @@ export default function Sidebar() {
             </Link>
           );
         })}
+
+        <div style={{ margin: "10px 0 6px", borderTop: "1px solid var(--border)" }} />
+        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", letterSpacing: "0.08em", padding: "0 10px", display: "block", marginBottom: 4 }}>SPORTS</span>
+        <a
+          href={MLB_URL}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "8px 10px", borderRadius: 8, marginBottom: 2,
+            color: "var(--muted)", fontSize: 13, fontWeight: 500, textDecoration: "none",
+          }}
+        >
+          <span>MLB Bets</span>
+          <span style={{ fontSize: 10, opacity: 0.5 }}>↗</span>
+        </a>
       </nav>
 
       <div ref={ref} style={{ padding: 10, borderTop: "1px solid var(--border)", position: "relative" }}>
