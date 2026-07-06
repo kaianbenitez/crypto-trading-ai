@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mlb-webapp",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-c", "import os; os.chdir(r'C:\\Users\\kbeni\\Downloads\\MLB Sportsbetting Model'); import uvicorn; uvicorn.run('mlb.webapp.main:app', host='127.0.0.1', port=8420)"],
+      "port": 8420
+    },
+    {
+      "name": "crypto-web",
+      "runtimeExecutable": "C:\\Users\\kbeni\\dev-crypto-web.cmd",
+      "runtimeArgs": [],
+      "port": 3000
+    },
+    {
+      "name": "crypto-web-prod",
+      "runtimeExecutable": "C:\\Users\\kbeni\\dev-crypto-web-prod.cmd",
+      "runtimeArgs": [],
+      "port": 3050
+    }
+  ]
+}

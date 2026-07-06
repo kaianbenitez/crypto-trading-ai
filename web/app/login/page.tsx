@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
+import { Button } from "../components/ui";
 
 export default function LoginPage() {
   const [password, setPassword] = useState("");
@@ -25,25 +26,30 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-zinc-950 px-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-900 p-6 sm:p-8">
-        <h1 className="mb-6 text-xl font-semibold text-zinc-100">Crypto Trading AI</h1>
+    <div style={{ display: "flex", minHeight: "100dvh", alignItems: "center", justifyContent: "center", background: "var(--bg)", padding: "0 16px" }}>
+      <form onSubmit={handleSubmit} className="ui-card" style={{ width: "100%", maxWidth: 380, padding: 28 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22 }}>
+          <span style={{ width: 30, height: 30, background: "var(--gradient-primary)", borderRadius: 8, display: "inline-block", flexShrink: 0, boxShadow: "0 4px 14px color-mix(in oklab, var(--accent) 45%, transparent)" }} />
+          <h1 style={{ fontSize: "var(--text-lg)", fontWeight: 700, color: "var(--text)", margin: 0 }}>Crypto Trading AI</h1>
+        </div>
         <input
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="mb-4 w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-3 text-base text-zinc-100"
           autoFocus
+          style={{
+            width: "100%", marginBottom: 14, borderRadius: "var(--radius-sm)", border: "1px solid var(--border2)",
+            background: "var(--surface2)", color: "var(--text)", padding: "12px 14px", fontSize: "var(--text-base)",
+            outline: "none", transition: "border-color var(--dur-base) var(--ease-out-quart), box-shadow var(--dur-base) var(--ease-out-quart)",
+          }}
+          onFocus={e => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.boxShadow = "0 0 0 3px color-mix(in oklab, var(--accent) 25%, transparent)"; }}
+          onBlur={e => { e.currentTarget.style.borderColor = "var(--border2)"; e.currentTarget.style.boxShadow = "none"; }}
         />
-        {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded bg-emerald-600 px-3 py-3 font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
+        {error && <p style={{ marginBottom: 14, fontSize: "var(--text-sm)", color: "var(--red)" }}>{error}</p>}
+        <Button type="submit" variant="primary" disabled={loading} style={{ width: "100%", minHeight: 46 }}>
           {loading ? "Signing in..." : "Sign in"}
-        </button>
+        </Button>
       </form>
     </div>
   );

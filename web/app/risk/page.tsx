@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CheckCircle, Circle, HourglassMedium } from "@phosphor-icons/react";
 import AuthGate from "../components/AuthGate";
 import Sidebar from "../components/Sidebar";
 import { api, RiskStatus, Validation } from "@/lib/api";
 import { money, pct, pnlColor } from "@/lib/format";
+import { Card } from "../components/ui";
 
 const READINESS_LABEL: Record<string, string> = {
   sample_size: "Enough closed trades to trust the numbers",
@@ -23,20 +25,11 @@ const TIER_LABEL: Record<string, string> = {
   drawdown: "Drawdown guard — sizing cut after a larger loss",
 };
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted)" }}>{title}</div>
-      <div style={{ padding: 16 }}>{children}</div>
-    </div>
-  );
-}
-
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
-      <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 3 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: color ?? "var(--text)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
+    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
+      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: "var(--text-base)", fontWeight: 700, color: color ?? "var(--text)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
     </div>
   );
 }
@@ -60,16 +53,16 @@ function RiskContent() {
       <Sidebar />
       <main className="page-main" style={{ flex: 1, minWidth: 0, maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ marginBottom: 18 }}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Risk</h1>
-          <p style={{ color: "var(--muted)", fontSize: 12, margin: "4px 0 0" }}>
+          <h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, margin: 0 }}>Risk</h1>
+          <p style={{ color: "var(--muted)", fontSize: "var(--text-xs)", margin: "4px 0 0" }}>
             How much the agent is risking per trade right now, and whether its 30-day track record has earned bigger size.
           </p>
         </div>
 
-        {error && <div style={{ color: "var(--red)", fontSize: 13, marginBottom: 12 }}>{error}</div>}
+        {error && <div style={{ color: "var(--red)", fontSize: "var(--text-sm)", marginBottom: 12 }}>{error}</div>}
 
         {!risk ? (
-          <div style={{ color: "var(--muted)", fontSize: 13 }}>Loading…</div>
+          <div style={{ color: "var(--muted)", fontSize: "var(--text-sm)" }}>Loading…</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <Card title="Current risk setting">
@@ -79,7 +72,7 @@ function RiskContent() {
                 <Stat label="Recent drawdown" value={`${risk.drawdown_pct.toFixed(2)}%`} color={risk.drawdown_pct > 5 ? "var(--red)" : undefined} />
                 <Stat label="Mode" value={risk.mode === "equity" ? "Tracks live exchange balance" : "Fixed configured amount"} />
               </div>
-              <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
+              <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", lineHeight: 1.5 }}>
                 <b style={{ color: "var(--text)" }}>{TIER_LABEL[risk.tier] ?? risk.tier}</b>
                 <div style={{ marginTop: 4 }}>Why: {risk.reason}</div>
               </div>
@@ -99,14 +92,17 @@ function RiskContent() {
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: readiness.ready ? "var(--green)" : "var(--amber)" }}>
-                    {readiness.ready ? "✅ Ready for bigger size" : "⏳ Not yet ready for bigger size"}
+                  {readiness.ready
+                    ? <CheckCircle size={16} weight="fill" color="var(--green)" />
+                    : <HourglassMedium size={16} color="var(--amber)" />}
+                  <span style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: readiness.ready ? "var(--green)" : "var(--amber)" }}>
+                    {readiness.ready ? "Ready for bigger size" : "Not yet ready for bigger size"}
                   </span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {Object.entries(readiness.checks).map(([key, passed]) => (
-                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-                      <span style={{ color: passed ? "var(--green)" : "var(--muted)" }}>{passed ? "✓" : "○"}</span>
+                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-xs)" }}>
+                      {passed ? <CheckCircle size={14} weight="fill" color="var(--green)" /> : <Circle size={14} color="var(--muted)" />}
                       <span style={{ color: passed ? "var(--text)" : "var(--muted)" }}>{READINESS_LABEL[key] ?? key}</span>
                     </div>
                   ))}
@@ -122,14 +118,14 @@ function RiskContent() {
                   <Stat label="Avg net R after cost" value={`${metrics.avg_net_r_after_estimated_cost >= 0 ? "+" : ""}${metrics.avg_net_r_after_estimated_cost.toFixed(2)}R`} color={pnlColor(metrics.avg_net_r_after_estimated_cost)} />
                   <Stat label="Tiny wins (< +0.5R)" value={String(metrics.tiny_win_count)} color={metrics.tiny_win_count > metrics.closed_count * 0.3 ? "var(--amber)" : undefined} />
                 </div>
-                <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 10 }}>
+                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 10 }}>
                   &quot;Avg net R after cost&quot; is the realized result per trade minus the estimated round-trip fee/slippage —
                   if this is much lower than the raw expectancy above, fees are eating a meaningful share of the edge.
                 </div>
                 {Object.keys(metrics.exit_reason_breakdown).length > 0 && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {Object.entries(metrics.exit_reason_breakdown).map(([reason, count]) => (
-                      <div key={reason} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 10px", fontSize: 11 }}>
+                      <div key={reason} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 10px", fontSize: "var(--text-xs)" }}>
                         <span style={{ color: "var(--muted)" }}>{reason.replace(/_/g, " ")}: </span>
                         <span style={{ fontWeight: 700 }}>{count}</span>
                       </div>
@@ -143,12 +139,12 @@ function RiskContent() {
               <Card title="By coin (last 30 days)">
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
                   {Object.entries(metrics.by_symbol).map(([sym, row]) => (
-                    <div key={sym} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 10px" }}>
-                      <div style={{ fontWeight: 700, fontSize: 12 }}>{sym.replace("/USDT", "")}</div>
-                      <div style={{ color: pnlColor(row.pnl), fontSize: 13, fontWeight: 700, marginTop: 2 }}>
+                    <div key={sym} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
+                      <div style={{ fontWeight: 700, fontSize: "var(--text-xs)" }}>{sym.replace("/USDT", "")}</div>
+                      <div style={{ color: pnlColor(row.pnl), fontSize: "var(--text-sm)", fontWeight: 700, marginTop: 2 }}>
                         {row.pnl >= 0 ? "+" : ""}${money.format(row.pnl)}
                       </div>
-                      <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.win_rate_pct.toFixed(0)}% WR, {row.avg_r >= 0 ? "+" : ""}{row.avg_r.toFixed(2)}R avg</div>
+                      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>{row.win_rate_pct.toFixed(0)}% WR, {row.avg_r >= 0 ? "+" : ""}{row.avg_r.toFixed(2)}R avg</div>
                     </div>
                   ))}
                 </div>

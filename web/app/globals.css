@@ -8,7 +8,11 @@
   --border:    #1e2533;
   --border2:   #27304a;
   --text:      #e2e6f0;
-  --muted:     #4a5570;
+  /* Pre-existing #4a5570 measured ~2.4:1 against --surface/--surface2 — fails
+     WCAG AA (4.5:1) for the body-size secondary text it's used for
+     everywhere (labels, meta, timestamps). Lightened to pass comfortably
+     (~5.6-6:1) while staying visually "muted" relative to --text. */
+  --muted:     #8b94a8;
   --accent:    #3b82f6;
   --accent2:   #6366f1;
   --green:     #22c55e;
@@ -16,7 +20,60 @@
   --red:       #ef4444;
   --red2:      #dc2626;
   --amber:     #f59e0b;
+  --amber2:    #d97706;
   --purple:    #a855f7;
+
+  /* ---- Gradient tokens: one named family per semantic meaning, reused ---- */
+  /* everywhere instead of one-off inline gradients per component.          */
+  --gradient-primary: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+  --gradient-profit:  linear-gradient(135deg, var(--green) 0%, var(--green2) 100%);
+  --gradient-loss:    linear-gradient(135deg, var(--red) 0%, var(--red2) 100%);
+  --gradient-caution: linear-gradient(135deg, var(--amber) 0%, var(--amber2) 100%);
+
+  /* ---- Type scale: fixed rem steps, ratio ~1.13-1.2 (product UI, not fluid) ---- */
+  --text-2xs:  0.6875rem; /* 11px — micro labels, badge text */
+  --text-xs:   0.75rem;   /* 12px — secondary text, meta */
+  --text-sm:   0.8125rem; /* 13px — body default */
+  --text-base: 0.875rem;  /* 14px — emphasized body, card titles */
+  --text-md:   0.9375rem; /* 15px — sub-headings */
+  --text-lg:   1.125rem;  /* 18px */
+  --text-xl:   1.25rem;   /* 20px — page h1 */
+  --text-2xl:  1.5rem;    /* 24px — large stat values */
+  --text-3xl:  1.75rem;   /* 28px — hero numbers, sparingly */
+
+  /* ---- Spacing scale: 4px base ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  /* ---- Radius scale ---- */
+  --radius-sm: 8px;    /* small controls: buttons, inputs, badges (non-pill), stat tiles */
+  --radius-md: 14px;   /* cards */
+  --radius-pill: 999px; /* pills: status badges, chips */
+
+  /* ---- Motion tokens ---- */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
+
+  /* ---- Elevation ---- */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.45);
+
+  /* ---- Semantic z-index scale (never arbitrary values) ---- */
+  --z-sticky: 40;
+  --z-drawer-backdrop: 50;
+  --z-drawer: 60;
+  --z-dropdown: 100;
+  --z-toast: 120;
 }
 
 @theme inline {
@@ -67,7 +124,15 @@ button, a {
   *, *::before, *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
+}
+
+.journal-row {
+  transition: background var(--dur-base) var(--ease-out-quart);
+}
+.journal-row:hover {
+  background: var(--surface2);
 }
 
 @media (max-width: 860px) {
@@ -81,6 +146,173 @@ button, a {
 }
 
 /* ------------------------------------------------------------------ */
+/* Shared UI primitives (Card / Badge / Button / StatCard)             */
+/* ------------------------------------------------------------------ */
+
+.ui-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color var(--dur-base) var(--ease-out-quart),
+              box-shadow var(--dur-base) var(--ease-out-quart),
+              transform var(--dur-base) var(--ease-out-quart);
+}
+
+/* Hover lift is opt-in (.ui-card--hoverable) — most cards are static data
+   containers; only genuinely interactive ones (linked trade rows, position
+   cards you can click through to TradingView) get the affordance. */
+.ui-card--hoverable {
+  cursor: pointer;
+}
+.ui-card--hoverable:hover {
+  border-color: var(--border2);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+@media (hover: none) {
+  .ui-card--hoverable:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+.ui-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.ui-card__title {
+  font-weight: 600;
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.ui-card__body {
+  padding: var(--space-3) var(--space-5) var(--space-4);
+}
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.ui-stat-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: transform var(--dur-base) var(--ease-out-quart),
+              box-shadow var(--dur-base) var(--ease-out-quart),
+              border-color var(--dur-base) var(--ease-out-quart);
+}
+.ui-stat-card--accent {
+  background: linear-gradient(135deg,
+    color-mix(in oklab, var(--stat-accent) 20%, var(--surface)) 0%,
+    color-mix(in oklab, var(--stat-accent) 8%, var(--surface)) 55%,
+    var(--surface) 100%);
+  border-color: color-mix(in oklab, var(--stat-accent) 38%, var(--border));
+}
+.ui-stat-card--accent::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--stat-accent);
+}
+.ui-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+@media (hover: none) {
+  .ui-stat-card:hover { transform: none; box-shadow: none; }
+}
+
+/* Buttons: one shape, one motion contract — hover lift, active press-down. */
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  border: 1px solid transparent;
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  transition: transform var(--dur-fast) var(--ease-out-quart),
+              background var(--dur-base) var(--ease-out-quart),
+              border-color var(--dur-base) var(--ease-out-quart),
+              box-shadow var(--dur-base) var(--ease-out-quart);
+}
+.ui-btn:active:not(:disabled) { transform: scale(0.97); }
+.ui-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.ui-btn--primary {
+  background: var(--gradient-primary);
+  border-color: color-mix(in oklab, var(--accent) 60%, transparent);
+  color: white;
+}
+.ui-btn--primary:hover:not(:disabled) { box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent2) 60%, transparent), var(--shadow-md); }
+
+.ui-btn--secondary {
+  background: var(--surface2);
+  border-color: var(--border2);
+  color: var(--text);
+}
+.ui-btn--secondary:hover:not(:disabled) { background: var(--surface3); border-color: color-mix(in oklab, var(--accent) 40%, var(--border2)); }
+
+.ui-btn--danger {
+  background: color-mix(in oklab, var(--red) 14%, transparent);
+  border-color: color-mix(in oklab, var(--red) 45%, transparent);
+  color: var(--red);
+}
+.ui-btn--danger:hover:not(:disabled) { background: color-mix(in oklab, var(--red) 22%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--red) 45%, transparent); }
+
+.ui-btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  min-height: auto;
+  padding: 4px 2px;
+}
+.ui-btn--ghost:hover:not(:disabled) { color: var(--text); }
+
+@media (hover: none) {
+  .ui-btn--primary:hover:not(:disabled),
+  .ui-btn--secondary:hover:not(:disabled),
+  .ui-btn--danger:hover:not(:disabled) { box-shadow: none; }
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion utilities: entrance stagger for lists, respecting reduced-   */
+/* motion (collapses to instant/no-op via the global rule above).      */
+/* ------------------------------------------------------------------ */
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in var(--dur-slow) var(--ease-out-quart) both;
+}
+
+/* ------------------------------------------------------------------ */
 /* Responsive app shell: sidebar (row + fixed rail) on desktop,        */
 /* top bar + slide-in drawer on phones/small tablets.                 */
 /* ------------------------------------------------------------------ */
@@ -90,7 +322,7 @@ button, a {
 }
 
 .page-main {
-  padding: 28px 28px 60px;
+  padding: var(--space-7) var(--space-7) 60px;
 }
 
 @media (max-width: 860px) {
@@ -99,21 +331,28 @@ button, a {
   }
 
   .page-main {
-    padding: 16px 16px calc(32px + env(safe-area-inset-bottom));
+    padding: var(--space-4) var(--space-4) calc(32px + env(safe-area-inset-bottom));
   }
 }
 
 .nav-link {
-  display: block;
-  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--radius-sm);
   margin-bottom: 2px;
-  padding: 8px 10px;
-  font-size: 13px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
   text-decoration: none;
+  transition: background var(--dur-base) var(--ease-out-quart), color var(--dur-base) var(--ease-out-quart);
+}
+.nav-link:hover {
+  background: var(--surface2);
+  color: var(--text);
 }
 
 .sidebar {
-  width: 200px;
+  width: 208px;
   flex-shrink: 0;
   background: var(--surface);
   border-right: 1px solid var(--border);
@@ -123,7 +362,7 @@ button, a {
   position: sticky;
   top: 0;
   align-self: flex-start;
-  z-index: 40;
+  z-index: var(--z-sticky);
 }
 
 .sidebar-body {
@@ -175,13 +414,14 @@ button, a {
     background: var(--surface);
     border-right: 1px solid var(--border);
     transform: translateX(-100%);
-    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
-    z-index: 60;
+    transition: transform var(--dur-base) var(--ease-out-expo);
+    z-index: var(--z-drawer);
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+    box-shadow: var(--shadow-lg);
   }
 
   .sidebar-body[data-open="true"] {
@@ -193,10 +433,10 @@ button, a {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
-    z-index: 50;
+    z-index: var(--z-drawer-backdrop);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 220ms ease;
+    transition: opacity var(--dur-base) ease;
   }
 
   .sidebar-backdrop[data-open="true"] {
@@ -206,7 +446,7 @@ button, a {
 
   .nav-link {
     padding: 12px 14px;
-    font-size: 15px;
+    font-size: var(--text-md);
   }
 }
 
@@ -214,5 +454,32 @@ button, a {
   .sidebar-body,
   .sidebar-backdrop {
     transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Generic responsive helpers used across the 8 pages                  */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .header-row {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  .header-row > * + * {
+    margin-top: var(--space-3);
+  }
+
+  /* Live Log: fixed-width label/columns don't fit a phone screen. */
+  .gate-stat-row {
+    align-items: flex-start !important;
+  }
+  .gate-stat-label {
+    width: 100% !important;
+  }
+
+  .log-row {
+    grid-template-columns: 1fr !important;
+    gap: 4px !important;
   }
 }

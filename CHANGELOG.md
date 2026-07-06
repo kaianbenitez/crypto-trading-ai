@@ -5,6 +5,45 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-07
 
+- **Redesigned the dashboard's visual language** — a genuine visual overhaul, not
+  a rebuild. All 8 tabs (Dashboard, Journal, Coin Watch, Risk, Adaptive, Live Log,
+  Settings, Changelog) plus Login now share one system instead of hand-rolled
+  inline styles per page:
+  - **Component consolidation first**: extracted `Card`, `Badge`, `Button`,
+    `StatCard`, `Skeleton` into `web/app/components/ui/`, replacing 4 separate
+    copy-pasted `Card` implementations and inline button/badge styling across
+    every page.
+  - **Design tokens** in `globals.css`: named gradient tokens
+    (`--gradient-primary/profit/loss/caution`), a fixed type scale
+    (`--text-2xs` through `--text-3xl`), a spacing scale (`--space-1..8`), a
+    two-tier radius scale (8px controls / 14px cards / pill badges), motion
+    tokens (`--ease-out-expo/quart`, `--dur-fast/base/slow`), an elevation
+    scale, and a semantic z-index scale — no more ad hoc 6-20px choices or
+    one-off inline gradients per component.
+  - **Motion**: hover lift + shadow glow on cards, `:active` press-down on
+    buttons, smooth color/border transitions — all via CSS
+    `transform`/`opacity`/`box-shadow`/`background` transitions, never
+    layout properties. Every animated element respects
+    `prefers-reduced-motion` (collapses to instant).
+  - **Icons**: installed `@phosphor-icons/react` (no prior icon library) and
+    replaced hand-rolled unicode/emoji icons throughout — sidebar nav,
+    kill-switch controls, sentiment indicators, status dots, external links.
+  - **Responsiveness audit**: fixed two pages (`Live Log`'s gate-stat rows and
+    feed rows) that had fixed-width columns which would have broken under
+    640px; verified stat grids collapse to single-column and the sidebar
+    drawer behavior extends correctly on every page, not just Dashboard.
+  - **Accessibility fix**: `--muted` (#4a5570) measured ~2.4:1 against
+    `--surface`/`--surface2` — a pre-existing WCAG AA failure (needs 4.5:1)
+    affecting secondary/meta text on every page. Lightened to `#8b94a8`
+    (~5.6-6:1), verified via manual sRGB relative-luminance calculation.
+  - Semantic color meaning preserved exactly (green=profit, red=loss,
+    amber=caution/halted, blue=primary/neutral); no API/route/auth changes.
+  - Verified via `tsc --noEmit`, `eslint`, a clean `next build` (all 9 routes
+    prerender successfully), and live browser screenshots at desktop/tablet
+    (768px)/mobile (375px) widths plus a live sidebar-drawer interaction test.
+
+## 2026-07-07
+
 - **Added decision-log observability (no strategy/signal changes).** The agent
   already built a per-cycle `signal_summary` (why each coin did/didn't trade)
   but only logged it to journalctl. Now that same content is persisted and

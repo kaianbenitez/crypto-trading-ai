@@ -3,6 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import {
+  Gauge, Broadcast, BookOpen, Eye, ShieldWarning, Brain, GearSix,
+  ClockCounterClockwise, ArrowSquareOut, SignOut, List, X,
+} from "@phosphor-icons/react";
 import { AgentStatus, api } from "@/lib/api";
 
 function serviceText(v?: string) { return !v ? "—" : v === "active" ? "Online" : v === "inactive" ? "Offline" : v; }
@@ -34,14 +38,14 @@ const SERVICE_LIST: { name: string; key: keyof AgentStatus }[] = [
 ];
 
 const NAV_ITEMS = [
-  { label: "Dashboard",  href: "/" },
-  { label: "Live Log",   href: "/log" },
-  { label: "Journal",    href: "/journal" },
-  { label: "Coin Watch", href: "/coins" },
-  { label: "Risk",       href: "/risk" },
-  { label: "Adaptive",   href: "/adaptive" },
-  { label: "Settings",   href: "/settings" },
-  { label: "Changelog",  href: "/changelog" },
+  { label: "Dashboard",  href: "/",         icon: Gauge },
+  { label: "Live Log",   href: "/log",      icon: Broadcast },
+  { label: "Journal",    href: "/journal",  icon: BookOpen },
+  { label: "Coin Watch", href: "/coins",    icon: Eye },
+  { label: "Risk",       href: "/risk",     icon: ShieldWarning },
+  { label: "Adaptive",   href: "/adaptive", icon: Brain },
+  { label: "Settings",   href: "/settings", icon: GearSix },
+  { label: "Changelog",  href: "/changelog", icon: ClockCounterClockwise },
 ];
 
 const MLB_URL = "/mlb/";
@@ -110,8 +114,8 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
         <Link href="/" style={{ padding: "18px 18px 14px", display: "flex", alignItems: "center", gap: 8, textDecoration: "none" }}>
-          <span style={{ width: 22, height: 22, background: "linear-gradient(135deg, var(--accent), var(--accent2))", borderRadius: 6, display: "inline-block", flexShrink: 0 }} />
-          <span style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>TradingAI</span>
+          <span style={{ width: 24, height: 24, background: "var(--gradient-primary)", borderRadius: 7, display: "inline-block", flexShrink: 0, boxShadow: "0 2px 8px color-mix(in oklab, var(--accent) 45%, transparent)" }} />
+          <span style={{ fontWeight: 700, fontSize: "var(--text-base)", color: "var(--text)" }}>TradingAI</span>
         </Link>
 
         <button
@@ -120,16 +124,7 @@ export default function Sidebar() {
           aria-label={navOpen ? "Close menu" : "Open menu"}
           aria-expanded={navOpen}
         >
-          <span style={{ position: "relative", width: 18, height: 13 }}>
-            {[0, 1, 2].map(i => (
-              <span key={i} style={{
-                position: "absolute", left: 0, right: 0, height: 2, background: "var(--text)", borderRadius: 1,
-                top: i === 0 ? 0 : i === 1 ? 5.5 : 11,
-                transform: navOpen && i === 1 ? "scaleX(0)" : navOpen && i === 0 ? "translateY(5.5px) rotate(45deg)" : navOpen && i === 2 ? "translateY(-5.5px) rotate(-45deg)" : undefined,
-                transition: "transform 180ms ease, opacity 180ms ease",
-              }} />
-            ))}
-          </span>
+          {navOpen ? <X size={20} weight="bold" /> : <List size={20} weight="bold" />}
         </button>
       </div>
 
@@ -139,6 +134,7 @@ export default function Sidebar() {
         <nav style={{ flex: 1, padding: "4px 10px" }}>
           {NAV_ITEMS.map(item => {
             const active = pathname === item.href;
+            const Icon = item.icon;
             return (
               <Link
                 key={item.href}
@@ -150,44 +146,45 @@ export default function Sidebar() {
                   fontWeight: active ? 600 : 500,
                 }}
               >
+                <Icon size={16} weight={active ? "fill" : "regular"} style={{ flexShrink: 0, color: active ? "var(--accent)" : "currentColor" }} />
                 {item.label}
               </Link>
             );
           })}
 
           <div style={{ margin: "10px 0 6px", borderTop: "1px solid var(--border)" }} />
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted)", letterSpacing: "0.08em", padding: "0 10px", display: "block", marginBottom: 4 }}>SPORTS</span>
+          <span style={{ fontSize: "var(--text-2xs)", fontWeight: 700, color: "var(--muted)", letterSpacing: "0.08em", padding: "0 10px", display: "block", marginBottom: 4 }}>SPORTS</span>
           <a
             href={MLB_URL}
             target="_blank"
             rel="noreferrer"
             className="nav-link"
             style={{
-              display: "flex", alignItems: "center", justifyContent: "space-between",
+              justifyContent: "space-between",
               color: "var(--muted)", fontWeight: 500,
             }}
           >
-            <span>MLB Bets</span>
-            <span style={{ fontSize: 10, opacity: 0.5 }}>↗</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>MLB Bets</span>
+            <ArrowSquareOut size={13} style={{ opacity: 0.6 }} />
           </a>
         </nav>
 
         <div ref={ref} style={{ padding: 10, borderTop: "1px solid var(--border)", position: "relative" }}>
           {open && (
-            <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 10, right: 10, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, padding: 6, zIndex: 100, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+            <div className="rise-in" style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 10, right: 10, background: "var(--surface2)", border: "1px solid var(--border2)", borderRadius: "var(--radius-sm)", padding: 6, zIndex: 100, boxShadow: "var(--shadow-lg)" }}>
               {SERVICE_LIST.map((s, i) => (
                 <div key={s.name} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 6px", gap: 12 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <Dot state={states[i]} />
-                    <span style={{ fontSize: 12, color: "var(--muted)" }}>{s.name}</span>
+                    <span style={{ fontSize: "var(--text-xs)", color: "var(--muted)" }}>{s.name}</span>
                   </div>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: serviceColor(states[i]) }}>{serviceText(states[i])}</span>
+                  <span style={{ fontSize: "var(--text-2xs)", fontWeight: 600, color: serviceColor(states[i]) }}>{serviceText(states[i])}</span>
                 </div>
               ))}
               {status?.exchange && (
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 6px", gap: 12, marginTop: 2, borderTop: "1px solid var(--border)" }}>
-                  <span style={{ fontSize: 12, color: "var(--muted)" }}>Exchange</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: "var(--text)" }}>{status.exchange}{status.testnet ? " (testnet)" : ""}</span>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--muted)" }}>Exchange</span>
+                  <span style={{ fontSize: "var(--text-2xs)", fontWeight: 600, color: "var(--text)" }}>{status.exchange}{status.testnet ? " (testnet)" : ""}</span>
                 </div>
               )}
             </div>
@@ -195,17 +192,17 @@ export default function Sidebar() {
 
           {status?.testnet && (
             <div style={{ marginBottom: 8 }}>
-              <span style={{ color: "var(--amber)", background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 20, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>TESTNET</span>
+              <span className="ui-badge" style={{ color: "var(--amber)", background: "color-mix(in oklab, var(--amber) 14%, transparent)", borderColor: "color-mix(in oklab, var(--amber) 32%, transparent)" }}>TESTNET</span>
             </div>
           )}
 
-          <button onClick={() => setOpen(o => !o)} aria-label="Service status" style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: 0, cursor: "pointer", padding: "6px 0", width: "100%", minHeight: 32 }}>
+          <button onClick={() => setOpen(o => !o)} aria-label="Service status" style={{ display: "flex", alignItems: "center", gap: 6, background: "transparent", border: 0, cursor: "pointer", padding: "6px 0", width: "100%", minHeight: 32, borderRadius: "var(--radius-sm)", transition: "color var(--dur-base) var(--ease-out-quart)" }}>
             <span className={allOk ? "pulse-dot" : ""} style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
-            <span style={{ fontSize: 12, fontWeight: 600, color: dotColor }}>{label}</span>
+            <span style={{ fontSize: "var(--text-xs)", fontWeight: 600, color: dotColor }}>{label}</span>
           </button>
 
-          <button onClick={handleLogout} style={{ marginTop: 6, background: "transparent", border: 0, color: "var(--muted)", cursor: "pointer", fontSize: 12, padding: "6px 0" }}>
-            Logout
+          <button onClick={handleLogout} className="ui-btn ui-btn--ghost" style={{ marginTop: 6, fontSize: "var(--text-xs)", justifyContent: "flex-start", gap: 6 }}>
+            <SignOut size={13} /> Logout
           </button>
         </div>
       </div>

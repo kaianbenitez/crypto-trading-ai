@@ -2,12 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { Play, Prohibit, ArrowSquareOut, WarningCircle } from "@phosphor-icons/react";
 import { AgentStatus, api, CandlePayload, CoinDigest, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
 import { money, pct, pnlColor, price4 } from "@/lib/format";
 import AuthGate from "./components/AuthGate";
 import Sidebar from "./components/Sidebar";
 import CoinLogo from "./components/CoinLogo";
 import CoinDigestCard from "./components/CoinDigestCard";
+import { Card, Badge, Button, StatCard } from "./components/ui";
 
 // TradingView chart link for a symbol, opened in a new tab from the coin logo/name.
 function tradingViewUrl(symbol: string) {
@@ -37,49 +39,6 @@ const TRADE_REGIME_LABEL: Record<string, string> = {
 };
 function friendlyStrategy(s?: string) { return s ? (STRATEGY_LABEL[s] ?? s.replace(/_/g, " ")) : "—"; }
 function friendlyTradeRegime(r?: string) { return r ? (TRADE_REGIME_LABEL[r] ?? r.replace(/_/g, " ")) : "—"; }
-
-// ── primitives ───────────────────────────────────────────────────────────────
-function Badge({ children, color, bg }: { children: React.ReactNode; color?: string; bg?: string }) {
-  const c = color || "var(--muted)";
-  return (
-    <span style={{ color: c, background: bg || c + "18", border: `1px solid ${c}30`, borderRadius: 20, padding: "2px 8px", fontSize: 11, fontWeight: 600, letterSpacing: "0.03em", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
-      {children}
-    </span>
-  );
-}
-
-function Skeleton({ w, h }: { w?: string; h?: number }) {
-  return <span className="skeleton" style={{ display: "block", width: w || "60%", height: h || 20 }} />;
-}
-
-// ── stat card ────────────────────────────────────────────────────────────────
-function StatCard({
-  label, value, sub, color, loading, accent, large
-}: {
-  label: string; value: string; sub?: string; color?: string; loading?: boolean; accent?: string; large?: boolean;
-}) {
-  return (
-    <div style={{
-      background: accent
-        ? `linear-gradient(135deg, ${accent}55 0%, ${accent}22 55%, ${accent}0f 100%)`
-        : "var(--surface)",
-      border: `1px solid ${accent ? accent + "60" : "var(--border)"}`,
-      borderRadius: 14,
-      padding: large ? "20px 20px" : "14px 16px",
-      position: "relative",
-      overflow: "hidden",
-    }}>
-      {accent && <span style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: accent, borderRadius: "14px 14px 0 0" }} />}
-      <div style={{ color: "var(--muted)", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em" }}>{label}</div>
-      {loading ? (
-        <Skeleton h={large ? 32 : 24} />
-      ) : (
-        <div style={{ color: color || "var(--text)", fontSize: large ? 26 : 20, fontWeight: 700, marginTop: 6, fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>{value}</div>
-      )}
-      {sub && !loading && <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 4 }}>{sub}</div>}
-    </div>
-  );
-}
 
 // ── PnlBar: visual range bar for entry/SL/TP ────────────────────────────────
 function PnlBar({ trade, currentPrice, tall = false }: { trade: Pick<Trade, "entry_price" | "stop_loss" | "take_profit" | "side">; currentPrice?: number; tall?: boolean }) {
@@ -157,7 +116,7 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
     : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
 
   return (
-    <div style={{ background: "var(--surface)", border: `1px solid ${sideColor}24`, borderRadius: 10, overflow: "hidden" }}>
+    <div className="ui-card" style={{ borderColor: `color-mix(in oklab, ${sideColor} 22%, var(--border))` }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <a
@@ -169,13 +128,13 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
           >
             <CoinLogo symbol={trade.symbol} size={26} />
             <div>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{trade.symbol}</div>
-              <div style={{ color: "var(--muted)", fontSize: 11 }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
+              <div style={{ fontWeight: 700, fontSize: "var(--text-base)" }}>{trade.symbol}</div>
+              <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
             </div>
           </a>
           <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
         </div>
-        <span style={{ color: "var(--muted)", fontSize: 11 }}>
+        <span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
           Opened {new Date(trade.opened_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
         </span>
       </div>
@@ -183,19 +142,19 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
       <div style={{ padding: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
           <div>
-            <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Unrealized P&L</div>
-            <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: 24, fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>Unrealized P&L</div>
+            <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: "var(--text-2xl)", fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
               {openPnl === undefined ? "Loading" : `${openPnl >= 0 ? "+" : ""}$${money.format(openPnl)}`}
             </div>
             {openPct !== undefined && (
-              <div style={{ color: pnlColor(openPct), fontSize: 12, marginTop: 5 }}>
+              <div style={{ color: pnlColor(openPct), fontSize: "var(--text-xs)", marginTop: 5 }}>
                 {openPct >= 0 ? "+" : ""}{openPct.toFixed(2)}% since entry
               </div>
             )}
           </div>
           <div style={{ textAlign: "right" }}>
-            <div style={{ color: "var(--muted)", fontSize: 11, marginBottom: 3 }}>Price now</div>
-            <div style={{ fontSize: 16, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{currentPrice === undefined ? "..." : price4.format(currentPrice)}</div>
+            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>Price now</div>
+            <div style={{ fontSize: "var(--text-md)", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{currentPrice === undefined ? "..." : price4.format(currentPrice)}</div>
           </div>
         </div>
 
@@ -207,42 +166,42 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
             ["Entry", price4.format(trade.entry_price), "var(--accent)"],
             ["Take Profit", price4.format(trade.take_profit), "var(--green)"],
           ].map(([label, value, color]) => (
-            <div key={label} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 9px" }}>
-              <div style={{ color: color as string, fontSize: 11, fontWeight: 700 }}>{label}</div>
-              <div style={{ fontSize: 13, fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{value}</div>
+            <div key={label} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 9px" }}>
+              <div style={{ color: color as string, fontSize: "var(--text-2xs)", fontWeight: 700 }}>{label}</div>
+              <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{value}</div>
             </div>
           ))}
         </div>
 
-        <div style={{ color: "var(--muted)", fontSize: 10.5, marginBottom: note ? 10 : 0 }}>
+        <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: note ? 10 : 0 }}>
           ${money.format(riskedAmt)} at risk · qty {price4.format(trade.qty)}
         </div>
 
         {note && (
           <div style={{ paddingTop: 8, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6 }}>
             <div>
-              <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
+              <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
                 Thesis
               </div>
-              <div style={{ color: "var(--text)", fontSize: 11.5, lineHeight: 1.45 }}>
+              <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.45 }}>
                 {note}
               </div>
             </div>
             {detail.reasoning.why_accepted.length > 0 && (
-              <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>
+              <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
                 Why accepted: {detail.reasoning.why_accepted.join(" ")}
               </div>
             )}
             {detail.reasoning.weakness && (
-              <div style={{ color: "var(--amber)", fontSize: 11, lineHeight: 1.4 }}>
-                ⚠ Weakness: {detail.reasoning.weakness}
+              <div style={{ color: "var(--amber)", fontSize: "var(--text-2xs)", lineHeight: 1.4, display: "flex", gap: 4, alignItems: "flex-start" }}>
+                <WarningCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> {detail.reasoning.weakness}
               </div>
             )}
-            <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>
+            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
               Invalidation: {detail.reasoning.invalidation}
             </div>
             {detail.reasoning.past_context && (
-              <div style={{ color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>
+              <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
                 Past: {detail.reasoning.past_context}
               </div>
             )}
@@ -260,9 +219,7 @@ function OpenPosition({ trade }: { trade: Trade }) {
     ? snapshot.actual_risk_usdt
     : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
   return (
-    <div style={{ background: "var(--surface)", border: `1px solid ${sideColor}22`, borderRadius: 14, padding: "16px 20px", position: "relative", overflow: "hidden" }}>
-      <span style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: 3, background: sideColor, borderRadius: "14px 0 0 14px" }} />
-
+    <div className="ui-card" style={{ padding: "16px 20px", borderColor: `color-mix(in oklab, ${sideColor} 20%, var(--border))` }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <a
           href={tradingViewUrl(trade.symbol)}
@@ -273,8 +230,8 @@ function OpenPosition({ trade }: { trade: Trade }) {
         >
           <CoinLogo symbol={trade.symbol} size={30} />
           <div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>{trade.symbol.replace("/USDT", "")}<span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>/USDT</span></div>
-            <div style={{ color: "var(--muted)", fontSize: 11 }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
+            <div style={{ fontWeight: 700, fontSize: "var(--text-md)" }}>{trade.symbol.replace("/USDT", "")}<span style={{ color: "var(--muted)", fontWeight: 400, fontSize: "var(--text-xs)" }}>/USDT</span></div>
+            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
           </div>
         </a>
         <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
@@ -283,7 +240,7 @@ function OpenPosition({ trade }: { trade: Trade }) {
 
       {/* Range bar */}
       <PnlBar trade={trade} />
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--muted)", marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-2xs)", color: "var(--muted)", marginBottom: 10 }}>
         <span>SL {price4.format(trade.stop_loss)}</span>
         <span style={{ color: "var(--accent)" }}>Entry {price4.format(trade.entry_price)}</span>
         <span>TP {price4.format(trade.take_profit)}</span>
@@ -295,23 +252,23 @@ function OpenPosition({ trade }: { trade: Trade }) {
           { label: "Qty", value: trade.qty ? price4.format(trade.qty) : "—" },
           { label: "Opened", value: new Date(trade.opened_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
         ].map(({ label, value }) => (
-          <div key={label} style={{ background: "var(--surface2)", borderRadius: 8, padding: "8px 10px" }}>
-            <div style={{ color: "var(--muted)", fontSize: 10, marginBottom: 2 }}>{label}</div>
-            <div style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{value}</div>
+          <div key={label} style={{ background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
+            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 2 }}>{label}</div>
+            <div style={{ fontSize: "var(--text-sm)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{value}</div>
           </div>
         ))}
       </div>
 
-      <div style={{ color: "var(--muted)", fontSize: 10.5, marginTop: 8 }}>
+      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginTop: 8 }}>
         ${money.format(riskedAmt)} at risk
       </div>
 
       {trade.entry_reasoning.length > 0 && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-          <div style={{ color: "var(--muted)", fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
+          <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
             Thesis
           </div>
-          <div style={{ color: "var(--text)", fontSize: 11, lineHeight: 1.5 }}>
+          <div style={{ color: "var(--text)", fontSize: "var(--text-2xs)", lineHeight: 1.5 }}>
             {specificReasoning(trade.entry_reasoning)}
           </div>
         </div>
@@ -354,49 +311,36 @@ function TradeRow({ trade }: { trade: Trade }) {
   return (
     <Link
       href={`/journal?trade=${trade.id}`}
-      style={{ color: "inherit", textDecoration: "none", background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, cursor: "pointer" }}
+      className="ui-card ui-card--hoverable"
+      style={{ color: "inherit", textDecoration: "none", background: "var(--surface2)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <CoinLogo symbol={trade.symbol} size={20} />
-        <span style={{ fontWeight: 600, fontSize: 13, flex: 1, minWidth: 0 }}>{trade.symbol.replace("/USDT", "")}</span>
+        <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", flex: 1, minWidth: 0 }}>{trade.symbol.replace("/USDT", "")}</span>
         <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-          <span style={{ color: pnlColor(pnl), fontWeight: 700, fontSize: 15, fontVariantNumeric: "tabular-nums" }}>
-            {pnl >= 0 ? "+" : ""}{money.format(pnl)} <span style={{ fontSize: 10, fontWeight: 400, color: "var(--muted)" }}>USDT</span>
+          <span style={{ color: pnlColor(pnl), fontWeight: 700, fontSize: "var(--text-md)", fontVariantNumeric: "tabular-nums" }}>
+            {pnl >= 0 ? "+" : ""}{money.format(pnl)} <span style={{ fontSize: "var(--text-2xs)", fontWeight: 400, color: "var(--muted)" }}>USDT</span>
           </span>
           {pnlPct !== undefined && (
-            <span style={{ color: pnlColor(pnlPct), fontSize: 11, fontWeight: 600 }}>
+            <span style={{ color: pnlColor(pnlPct), fontSize: "var(--text-2xs)", fontWeight: 600 }}>
               ({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
             </span>
           )}
         </div>
-        <span style={{ color: "var(--muted)", fontSize: 10 }}>
+        <span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
           {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "—"}
         </span>
       </div>
-      <div style={{ color: "var(--muted)", fontSize: 10.5 }}>
+      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
         ${money.format(riskedAmt)} at risk
       </div>
-      <div style={{ color: "var(--muted)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {footerNote}
       </div>
     </Link>
-  );
-}
-
-
-// ── card shell ───────────────────────────────────────────────────────────────
-function Card({ title, right, children, noPad }: { title: string; right?: React.ReactNode; children: React.ReactNode; noPad?: boolean }) {
-  return (
-    <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--border)" }}>
-        <span style={{ fontWeight: 600, fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)" }}>{title}</span>
-        {right}
-      </div>
-      <div style={noPad ? {} : { padding: "0 20px" }}>{children}</div>
-    </div>
   );
 }
 
@@ -408,31 +352,27 @@ function KillSwitchButton({ killActive, toggling, confirming, onHalt, onConfirm,
 }) {
   if (confirming) return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <span style={{ color: "var(--muted)", fontSize: 12 }}>Confirm halt?</span>
-      <button onClick={onConfirm} disabled={toggling} aria-label="Confirm halt"
-        style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.5)", color: "var(--red)", borderRadius: 8, padding: "11px 16px", minHeight: 44, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+      <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>Confirm halt?</span>
+      <Button variant="danger" onClick={onConfirm} disabled={toggling} aria-label="Confirm halt" style={{ minHeight: 44 }}>
         Yes, halt
-      </button>
-      <button ref={cancelRef} onClick={onCancel} aria-label="Cancel"
-        style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", borderRadius: 8, padding: "11px 16px", minHeight: 44, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+      </Button>
+      <Button ref={cancelRef} variant="secondary" onClick={onCancel} aria-label="Cancel" style={{ minHeight: 44 }}>
         Cancel
-      </button>
+      </Button>
     </div>
   );
 
   if (killActive) return (
-    <button onClick={onResume} disabled={toggling} aria-label="Resume trading"
-      style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.4)", color: "var(--red)", borderRadius: 8, padding: "11px 18px", minHeight: 44, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ fontSize: 10 }}>▶</span> {toggling ? "Resuming…" : "Resume trading"}
-    </button>
+    <Button variant="danger" onClick={onResume} disabled={toggling} aria-label="Resume trading" style={{ minHeight: 44, padding: "0 18px" }}>
+      <Play size={14} weight="fill" /> {toggling ? "Resuming…" : "Resume trading"}
+    </Button>
   );
 
   return (
-    <button onClick={onHalt} disabled={toggling} aria-label="Halt new entries"
-      style={{ background: "var(--surface2)", border: "1px solid var(--border2)", color: "var(--text)", borderRadius: 8, padding: "11px 18px", minHeight: 44, fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-      <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--red)", display: "inline-block" }} />
+    <Button variant="secondary" onClick={onHalt} disabled={toggling} aria-label="Halt new entries" style={{ minHeight: 44, padding: "0 18px" }}>
+      <Prohibit size={14} style={{ color: "var(--red)" }} />
       {toggling ? "Halting…" : "Halt entries"}
-    </button>
+    </Button>
   );
 }
 
@@ -543,7 +483,7 @@ function Dashboard() {
       {/* HALTED banner */}
       {killActive && (
         <div role="status" aria-live="polite"
-          style={{ background: "rgba(239,68,68,0.08)", borderBottom: "1px solid rgba(239,68,68,0.25)", color: "var(--red)", padding: "9px 24px", fontSize: 12, fontWeight: 600, textAlign: "center", letterSpacing: "0.05em" }}>
+          style={{ background: "color-mix(in oklab, var(--red) 10%, transparent)", borderBottom: "1px solid color-mix(in oklab, var(--red) 30%, transparent)", color: "var(--red)", padding: "9px 24px", fontSize: "var(--text-xs)", fontWeight: 600, textAlign: "center", letterSpacing: "0.05em" }}>
           ▐▐ TRADING HALTED — all new entries blocked
         </div>
       )}
@@ -551,13 +491,13 @@ function Dashboard() {
       <main className="page-main" style={{ maxWidth: 1560, margin: "0 auto" }}>
 
         {/* Header row */}
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
+        <div className="header-row" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Dashboard</h1>
+              <h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, margin: 0 }}>Dashboard</h1>
               {killActive && <Badge color="var(--red)">HALTED</Badge>}
             </div>
-            <p style={{ color: "var(--muted)", fontSize: 12, margin: "4px 0 0" }}>
+            <p style={{ color: "var(--muted)", fontSize: "var(--text-xs)", margin: "4px 0 0" }}>
               {loading ? "Connecting…" : `Updated ${lastChecked}`}
             </p>
           </div>
@@ -575,31 +515,35 @@ function Dashboard() {
 
         {/* Errors */}
         {error && (
-          <div role="alert" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--red)", borderRadius: 10, padding: "10px 16px", fontSize: 12, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div role="alert" style={{ background: "color-mix(in oklab, var(--red) 8%, transparent)", border: "1px solid color-mix(in oklab, var(--red) 30%, transparent)", color: "var(--red)", borderRadius: "var(--radius-sm)", padding: "10px 16px", fontSize: "var(--text-xs)", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <span>{error}</span>
-            <button onClick={load} style={{ background: "none", border: "none", color: "var(--red)", textDecoration: "underline", cursor: "pointer", fontSize: 12, flexShrink: 0 }}>Retry</button>
+            <button onClick={load} className="ui-btn ui-btn--ghost" style={{ color: "var(--red)", textDecoration: "underline" }}>Retry</button>
           </div>
         )}
         {toggleError && (
-          <div role="alert" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--red)", borderRadius: 10, padding: "10px 16px", fontSize: 12, marginBottom: 16 }}>
+          <div role="alert" style={{ background: "color-mix(in oklab, var(--red) 8%, transparent)", border: "1px solid color-mix(in oklab, var(--red) 30%, transparent)", color: "var(--red)", borderRadius: "var(--radius-sm)", padding: "10px 16px", fontSize: "var(--text-xs)", marginBottom: 16 }}>
             {toggleError}
           </div>
         )}
 
         {/* Stat row */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 18 }}>
-          <StatCard label="Bankroll" value={summary ? `$${money.format(summary.bankroll_usdt)}` : "—"} sub="USDT balance" loading={loading} accent="var(--accent)" />
-          <StatCard label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub="all-time" loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />
-          <StatCard label="Realized P&L" value={summary ? `${totalPnl >= 0 ? "+" : ""}$${money.format(totalPnl)}` : "—"} color={pnlColor(totalPnl)} sub={summary ? `${summary.total_trades} closed trades` : undefined} loading={loading} accent={pnlColor(totalPnl)} />
-          <StatCard label="Win Rate" value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"} sub={summary ? `${summary.total_trades} total` : undefined} loading={loading} accent={summary ? (summary.win_rate_pct >= 50 ? "var(--green)" : "var(--amber)") : undefined} />
-          <StatCard label="Open" value={summary ? String(summary.open_positions) : "—"} color={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} sub="positions" loading={loading} accent={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} />
-          <StatCard label="Macro" value={regimeMeta.label} color={regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regimeMeta.color} />
+          {[
+            <StatCard key="bankroll" label="Bankroll" value={summary ? `$${money.format(summary.bankroll_usdt)}` : "—"} sub="USDT balance" loading={loading} accent="var(--accent)" />,
+            <StatCard key="roi" label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub="all-time" loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />,
+            <StatCard key="pnl" label="Realized P&L" value={summary ? `${totalPnl >= 0 ? "+" : ""}$${money.format(totalPnl)}` : "—"} color={pnlColor(totalPnl)} sub={summary ? `${summary.total_trades} closed trades` : undefined} loading={loading} accent={pnlColor(totalPnl)} />,
+            <StatCard key="winrate" label="Win Rate" value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"} sub={summary ? `${summary.total_trades} total` : undefined} loading={loading} accent={summary ? (summary.win_rate_pct >= 50 ? "var(--green)" : "var(--amber)") : undefined} />,
+            <StatCard key="open" label="Open" value={summary ? String(summary.open_positions) : "—"} color={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} sub="positions" loading={loading} accent={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} />,
+            <StatCard key="macro" label="Macro" value={regimeMeta.label} color={regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regimeMeta.color} />,
+          ].map((el, i) => (
+            <div key={el.key} className="rise-in" style={{ animationDelay: `${i * 40}ms` }}>{el}</div>
+          ))}
         </div>
 
         {/* Open positions */}
         <div style={{ marginBottom: 18 }}>
           <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <h2 style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Open Positions</h2>
+            <h2 style={{ fontSize: "var(--text-xs)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Open Positions</h2>
             {openCount > 0 && <Badge color="var(--amber)">{openCount}</Badge>}
           </div>
           {positionDetails.length > 0 ? (
@@ -618,36 +562,36 @@ function Dashboard() {
               {openTrades.map(t => <OpenPosition key={t.id} trade={t} />)}
             </div>
           ) : (
-            <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 10, minHeight: 90, padding: 16, color: "var(--muted)", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+            <div className="ui-card" style={{ minHeight: 90, padding: 16, color: "var(--muted)", fontSize: "var(--text-sm)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
               {loading ? "Loading positions..." : "No open position right now — the agent is scanning every active coin and will open one once a good setup shows up."}
             </div>
           )}
         </div>
 
         {/* Recent closed trades */}
-        <Card title="Recent Closed Trades" right={<a href="/journal" style={{ color: "var(--accent)", fontSize: 11, textDecoration: "none" }}>View all →</a>} noPad>
+        <Card title="Recent Closed Trades" right={<Link href="/journal" style={{ color: "var(--accent)", fontSize: "var(--text-2xs)", textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>View all <ArrowSquareOut size={11} /></Link>} noPad>
           <div style={{ padding: "12px 20px 16px" }}>
             {loading ? (
-              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>Loading…</div>
+              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: "var(--text-sm)" }}>Loading…</div>
             ) : closedTrades.length > 0 ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
                 {closedTrades.map(t => <TradeRow key={t.id} trade={t} />)}
               </div>
             ) : (
-              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>No closed trades yet</div>
+              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: "var(--text-sm)" }}>No closed trades yet</div>
             )}
           </div>
         </Card>
 
         {/* Coin watch: daily price action + agent read + news sentiment per coin */}
         <div style={{ marginTop: 18 }}>
-          <Card title="Coin Watch" right={<span style={{ color: "var(--muted)", fontSize: 11 }}>Refreshed daily, ~9 PM PH</span>} noPad>
+          <Card title="Coin Watch" right={<span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>Refreshed daily, ~9 PM PH</span>} noPad>
             {coinDigests.length > 0 ? (
               <div style={{ padding: "12px 20px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
                 {coinDigests.map(d => <CoinDigestCard key={d.symbol} digest={d} />)}
               </div>
             ) : (
-              <div style={{ padding: "24px 20px", textAlign: "center", color: "var(--muted)", fontSize: 13 }}>
+              <div style={{ padding: "24px 20px", textAlign: "center", color: "var(--muted)", fontSize: "var(--text-sm)" }}>
                 {loading ? "Loading…" : "No digest yet today — the agent builds one for every coin once a day, around 9 PM PH. Check back after the next run."}
               </div>
             )}

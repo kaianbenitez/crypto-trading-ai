@@ -22,7 +22,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   if (!checked) {
-    return <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">Loading...</div>;
+    return (
+      <div style={{ display: "flex", minHeight: "100dvh", alignItems: "center", justifyContent: "center", background: "var(--bg)", color: "var(--muted)", fontSize: "var(--text-sm)" }}>
+        Loading...
+      </div>
+    );
   }
   return <>{children}</>;
 }
