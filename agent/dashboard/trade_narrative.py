@@ -245,7 +245,11 @@ def _past_context_line(session, symbol: str, exclude_trade_id: int) -> str:
 def _r_multiple(trade) -> float | None:
     if trade.pnl_usdt is None:
         return None
-    risk = abs(trade.entry_price - trade.stop_loss) * trade.qty
+    # original_qty (full position size) so this matches pnl_usdt, which is
+    # computed over the full size — trade.qty alone is reduced by partial
+    # fills and would understate the risk denominator.
+    full_qty = float(getattr(trade, "original_qty", None) or trade.qty)
+    risk = abs(trade.entry_price - trade.stop_loss) * full_qty
     if risk <= 0:
         return None
     return trade.pnl_usdt / risk

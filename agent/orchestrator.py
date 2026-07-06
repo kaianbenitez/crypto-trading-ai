@@ -562,6 +562,7 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
         regime=str(signal.indicator_snapshot.get("regime", "unknown")),
         entry_price=fill_price,
         qty=actual_qty,
+        original_qty=actual_qty,
         stop_loss=plan.stop_loss,
         take_profit=plan.take_profit,
         leverage=plan.leverage,
@@ -734,6 +735,12 @@ def _check_close(adapter, session, risk, state) -> bool:
         if still_open:
             return False
 
+    # Use the FULL original position size for PnL, not trade.qty — that field
+    # gets overwritten to the remaining size on a partial-fill reconciliation
+    # (see above), and multiplying the final exit price by only the remainder
+    # silently drops the profit/loss already realized on the filled portion.
+    full_qty = float(trade.original_qty or trade.qty)
+
     exit_fill = None
     try:
         if hasattr(adapter, "get_exit_fill"):
@@ -741,7 +748,7 @@ def _check_close(adapter, session, risk, state) -> bool:
                 state.symbol,
                 trade.side,
                 trade.opened_at,
-                trade.qty,
+                full_qty,
             )
     except Exception as e:
         log.warning(f"[{state.symbol}] Could not fetch exchange exit fill: {e}")
@@ -765,7 +772,7 @@ def _check_close(adapter, session, risk, state) -> bool:
             log.warning(f"[{state.symbol}] Exit fill and fallback candle unavailable; using entry price")
 
     direction  = 1 if trade.side == "long" else -1
-    raw_pnl    = (exit_price - trade.entry_price) * direction * trade.qty
+    raw_pnl    = (exit_price - trade.entry_price) * direction * full_qty
     if raw_pnl > 0 and state.tp_trailing_active:
         exit_reason = "trailing_take_profit"
     else:

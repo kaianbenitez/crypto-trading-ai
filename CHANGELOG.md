@@ -5,6 +5,21 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-06
 
+- **Fixed realized PnL understatement on partial fills.** When a TP order filled
+  only part of a position, `trade.qty` was reduced to the remaining size (needed
+  for correctly sizing the trailing stop / force-close), but the final PnL
+  calculation multiplied the exit price delta by that same reduced qty —
+  silently dropping all profit/loss already realized on the filled portion.
+  Added `Trade.original_qty` (the true full position size, preserved at entry)
+  and now use it for both `get_exit_fill`'s expected quantity and the final PnL
+  multiplication, so a blended average exit price across all fill legs produces
+  the mathematically correct total. Also fixed the dashboard/journal R-multiple
+  calculation, which had the same reduced-qty mismatch. New smoke test
+  `tests/smoke_pnl_accounting.py`. Note: this only fixes newly-closed trades
+  going forward — already-closed historical trades with partial fills keep
+  their (understated) recorded PnL, since the true original fill split can't be
+  reconstructed retroactively.
+
 - **Risk & strategy hardening pass** (from a full review of the risk/strategy stack):
   - **Recalibrated the EV model.** The old formula treated the confluence score as a
     literal win probability (a neutral market = 50% win rate), which made the EV floor

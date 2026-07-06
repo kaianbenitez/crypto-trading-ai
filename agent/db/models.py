@@ -18,7 +18,9 @@ class Trade(Base):
 
     entry_price = Column(Float, nullable=False)
     exit_price = Column(Float, nullable=True)
-    qty = Column(Float, nullable=False)
+    qty = Column(Float, nullable=False)          # current/remaining size — mutated on partial fills
+    original_qty = Column(Float, nullable=True)  # full size at entry — used for realized PnL so a
+                                                  # partial TP fill's profit isn't dropped at final close
     stop_loss = Column(Float, nullable=False)
     take_profit = Column(Float, nullable=False)
     leverage = Column(Integer, nullable=False)
@@ -246,6 +248,18 @@ def _run_lightweight_migrations(engine) -> None:
             if col not in existing_cols:
                 with engine.begin() as conn:
                     conn.execute(text(f"ALTER TABLE agent_state ADD COLUMN {col} {col_type}"))
+
+    if "trades" in inspector.get_table_names():
+        existing_cols = {c["name"] for c in inspector.get_columns("trades")}
+        if "original_qty" not in existing_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE trades ADD COLUMN original_qty REAL"))
+                # Best-effort backfill: for already-closed trades this can't
+                # recover the true original size (qty was already reduced by
+                # any partial fill before this column existed), but it's still
+                # strictly better than NULL, and any still-open trade at
+                # migration time has its correct, un-reduced qty.
+                conn.execute(text("UPDATE trades SET original_qty = qty WHERE original_qty IS NULL"))
 
 
 _migrations_done = False
