@@ -167,52 +167,47 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
 
         <PnlBar trade={trade} currentPrice={currentPrice} tall />
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 6 }}>
-          {[
-            ["Stop Loss", price4.format(trade.stop_loss), "var(--red)"],
-            ["Entry", price4.format(trade.entry_price), "var(--accent)"],
-            ["Take Profit", price4.format(trade.take_profit), "var(--green)"],
-          ].map(([label, value, color]) => (
-            <div key={label} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "7px 9px" }}>
-              <div style={{ color: color as string, fontSize: "var(--text-2xs)", fontWeight: 700 }}>{label}</div>
-              <div style={{ fontSize: "var(--text-sm)", fontWeight: 700, fontVariantNumeric: "tabular-nums", marginTop: 3 }}>{value}</div>
-            </div>
-          ))}
+        <div
+          style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 8 }}
+          title={riskPct !== undefined ? `${riskPct.toFixed(2)}% of bankroll risked · qty ${price4.format(trade.qty)}` : undefined}
+        >
+          <span style={{ color: "var(--red)" }}>SL {price4.format(trade.stop_loss)}</span>
+          {" · "}
+          <span style={{ color: "var(--accent)" }}>Entry {price4.format(trade.entry_price)}</span>
+          {" · "}
+          <span style={{ color: "var(--green)" }}>TP {price4.format(trade.take_profit)}</span>
         </div>
 
-        <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: note ? 10 : 0 }}>
-          {riskPct !== undefined ? `${riskPct.toFixed(2)}% risked` : "risk n/a"} · qty {price4.format(trade.qty)}
-        </div>
+        {detail.reasoning.weakness && (
+          <div style={{ color: "var(--amber)", fontSize: "var(--text-2xs)", lineHeight: 1.4, display: "flex", gap: 4, alignItems: "flex-start", marginBottom: note ? 8 : 0 }}>
+            <WarningCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> {detail.reasoning.weakness}
+          </div>
+        )}
 
         {note && (
-          <div style={{ paddingTop: 8, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 6 }}>
-            <div>
-              <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
-                Thesis
-              </div>
+          <details style={{ paddingTop: 8, borderTop: "1px solid var(--border)" }}>
+            <summary className="reasoning-toggle" style={{ cursor: "pointer", color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Reasoning
+            </summary>
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
               <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.45 }}>
                 {note}
               </div>
-            </div>
-            {detail.reasoning.why_accepted.length > 0 && (
+              {detail.reasoning.why_accepted.length > 0 && (
+                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
+                  Why accepted: {detail.reasoning.why_accepted.join(" ")}
+                </div>
+              )}
               <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
-                Why accepted: {detail.reasoning.why_accepted.join(" ")}
+                Invalidation: {detail.reasoning.invalidation}
               </div>
-            )}
-            {detail.reasoning.weakness && (
-              <div style={{ color: "var(--amber)", fontSize: "var(--text-2xs)", lineHeight: 1.4, display: "flex", gap: 4, alignItems: "flex-start" }}>
-                <WarningCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> {detail.reasoning.weakness}
-              </div>
-            )}
-            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
-              Invalidation: {detail.reasoning.invalidation}
+              {detail.reasoning.past_context && (
+                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
+                  Past: {detail.reasoning.past_context}
+                </div>
+              )}
             </div>
-            {detail.reasoning.past_context && (
-              <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
-                Past: {detail.reasoning.past_context}
-              </div>
-            )}
-          </div>
+          </details>
         )}
       </div>
     </div>
@@ -245,7 +240,10 @@ function OpenPosition({ trade }: { trade: Trade }) {
 
       {/* Range bar */}
       <PnlBar trade={trade} />
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-2xs)", color: "var(--muted)", marginBottom: 10 }}>
+      <div
+        style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-2xs)", color: "var(--muted)", marginBottom: 10 }}
+        title={riskPct !== undefined ? `${riskPct.toFixed(2)}% of bankroll risked · qty ${price4.format(trade.qty)}` : undefined}
+      >
         <span>SL {price4.format(trade.stop_loss)}</span>
         <span style={{ color: "var(--accent)" }}>Entry {price4.format(trade.entry_price)}</span>
         <span>TP {price4.format(trade.take_profit)}</span>
@@ -262,10 +260,6 @@ function OpenPosition({ trade }: { trade: Trade }) {
             <div style={{ fontSize: "var(--text-sm)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{value}</div>
           </div>
         ))}
-      </div>
-
-      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginTop: 8 }}>
-        {riskPct !== undefined ? `${riskPct.toFixed(2)}% risked` : "risk n/a"}
       </div>
 
       {trade.entry_reasoning.length > 0 && (
@@ -308,8 +302,6 @@ function TradeRow({ trade }: { trade: Trade }) {
   const pnl = trade.pnl_usdt ?? 0;
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   const pnlPct = trade.exit_price !== null ? unrealizedPct(trade, trade.exit_price) : undefined;
-  const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
-  const riskPct = typeof snapshot?.actual_risk_pct === "number" ? snapshot.actual_risk_pct : undefined;
   const footerNote = noteworthyExitReason(trade.exit_reason) ?? specificReasoning(trade.entry_reasoning);
   return (
     <Link
@@ -331,9 +323,6 @@ function TradeRow({ trade }: { trade: Trade }) {
         <span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
           {trade.closed_at ? parseApiDate(trade.closed_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "—"}
         </span>
-      </div>
-      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
-        {riskPct !== undefined ? `${riskPct.toFixed(2)}% risked` : "risk n/a"}
       </div>
       <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {footerNote}

@@ -5,6 +5,18 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Trimmed information density on the open-position dashboard cards** (per
+  `/impeccable critique` finding a 24/40 design score, driven almost entirely
+  by "every card is stuffed to capacity"). The always-on reasoning narrative
+  (Thesis / Why accepted / Invalidation / Past context) is now collapsed
+  behind a default-closed "Reasoning" disclosure — only a genuine live
+  warning (Weakness) still shows by default alongside P&L, price, and the
+  range bar. The redundant "X% risked · qty Y" line was dropped from closed
+  trade cards entirely and moved to a hover tooltip on open positions. The
+  duplicate SL/Entry/TP 3-tile grid (already shown as dots on the range bar)
+  was removed in favor of a single-line caption, matching the pattern the
+  simpler position card already used.
+
 - **Dashboard, journal, and risk pages now lead with percentages instead of
   dollar amounts.** Paper-account dollar figures read as "the bot barely
   makes money" when the underlying performance (in R and %) is fine — the
