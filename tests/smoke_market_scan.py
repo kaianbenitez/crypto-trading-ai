@@ -57,6 +57,11 @@ def main():
     settings.market_scan_fixed_majors = "BTC/USDT,ETH/USDT"
     settings.market_scan_exclude_symbols = "MANUALEXCLUDE/USDT"
     settings.market_scan_require_market_cap_rank = True
+    # This file tests the filter/rank logic itself, independent of liquidity
+    # source — mainnet-liquidity sourcing has its own dedicated smoke test
+    # (smoke_market_scan_mainnet_liquidity.py) with a mocked fetch, so this
+    # never needs a live network call.
+    settings.market_scan_use_mainnet_liquidity = False
 
     tickers = {
         "BTC/USDT:USDT": _ticker(500_000_000, last=60000, pct=1.0),

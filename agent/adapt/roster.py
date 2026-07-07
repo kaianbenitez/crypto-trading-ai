@@ -5,14 +5,42 @@ Two layers work together:
 1. Dynamic market scanner (stage 1, cheap): one fetch_all_tickers() call
    across the whole exchange, filtered (stablecoins/leveraged tokens/
    synthetic index-dominance products/excluded symbols/min volume/max
-   spread/market-cap rank) and ranked (volume + momentum), kept to the top
-   N. This replaces the old fixed CANDIDATE_SYMBOLS list as the source of
-   *candidates* — it does not run any indicators/MTF/signal logic itself.
-   Falls back to CANDIDATE_SYMBOLS if disabled, if the adapter doesn't
-   support it, or if the scan fails for any reason. The market-cap filter
-   (CoinGecko, free/no-key, top MARKET_SCAN_MIN_MARKET_CAP_RANK coins) keeps
-   micro-caps and index products like BTCDOM out even when they clear the
-   volume floor; it degrades to volume-only filtering if unavailable.
+   spread/market-cap rank/abnormal 24h moves) and ranked (volume + momentum),
+   kept to the top N. This replaces the old fixed CANDIDATE_SYMBOLS list as
+   the source of *candidates* — it does not run any indicators/MTF/signal
+   logic itself. Falls back to CANDIDATE_SYMBOLS if disabled, if the adapter
+   doesn't support it, or if the scan fails for any reason. The market-cap
+   filter (CoinGecko, free/no-key, top MARKET_SCAN_MIN_MARKET_CAP_RANK coins)
+   keeps micro-caps and index products like BTCDOM out even when they clear
+   the volume floor; it degrades to volume-only filtering if unavailable.
+
+   Liquidity/ranking data source vs tradability (MARKET_SCAN_USE_MAINNET_LIQUIDITY):
+   candidates are always enumerated from the exchange the bot actually trades
+   on (so nothing gets shortlisted that can't be executed), but on Binance
+   TESTNET the ticker volume/spread there is inflated/artificial — good
+   enough to prove execution works, useless for judging whether a coin is
+   genuinely liquid. When this flag is on (default) and running Binance
+   testnet, the quote volume/bid-ask spread/24h % change used to filter and
+   rank each candidate are instead read from Binance's real MAINNET public
+   tickers (see fetch_mainnet_liquidity_tickers — no API keys, read-only,
+   never touches order placement). A symbol only earns a shortlist slot if
+   it would look liquid on the real market, not just on testnet. Falls back
+   to the adapter's own ticker data (with a clear log line) if the mainnet
+   fetch fails for any reason. On mainnet-live trading this is a no-op (the
+   adapter's own tickers already are the real data).
+
+   Abnormal-move filter (MARKET_SCAN_MAX_ABS_24H_CHANGE_PCT, default 35%):
+   rejects symbols whose 24h % change exceeds this magnitude, applied BEFORE
+   ranking. A coin that just moved -50%/+70% on news is not a good candidate
+   for this bot's trend/mean-reversion baseline regardless of its liquidity.
+
+   Symbol denylist (MARKET_SCAN_EXCLUDE_SYMBOLS): comma-separated list of
+   exact "BASE/USDT" symbols, matched case-insensitively — works for any
+   symbol (e.g. "SUN/USDT,GWEI/USDT,M/USDT"), no special-casing needed.
+
+   Single-letter-base filter (MARKET_SCAN_EXCLUDE_SINGLE_LETTER_BASES,
+   default off): optionally reject symbols whose base is a single letter
+   (e.g. "M/USDT"). Off by default — not inherently bad, just available.
 
 2. Existing roster/bench logic (stage 2 gate, unchanged): every 24h, checks
    volume for active coins (drops illiquid), reviews win rate, benches on
@@ -21,9 +49,11 @@ Two layers work together:
    SMC/MTF/EV/risk-admission stack in the orchestrator.
 
 Hard limits:
-  - Max 15 active symbols at once
+  - Max MARKET_SCAN_ACTIVE_SYMBOLS active symbols at once (defaults to
+    MARKET_SCAN_TOP_N, currently 30)
   - Min $50M 24h volume to be eligible (stage 2 recheck; stage 1 has its own
-    configurable floor via MARKET_SCAN_MIN_QUOTE_VOLUME)
+    configurable floor via MARKET_SCAN_MIN_QUOTE_VOLUME, judged against
+    mainnet liquidity data when testnet — see above)
   - Benched coin must wait MIN_BENCH_HOURS before re-evaluation
 """
 from __future__ import annotations
@@ -48,7 +78,7 @@ CANDIDATE_SYMBOLS = [
     "POL/USDT", "LTC/USDT", "UNI/USDT", "ATOM/USDT", "FIL/USDT",
 ]
 
-MAX_ACTIVE = 15
+MAX_ACTIVE = max(1, settings.market_scan_active_symbols)
 MIN_VOLUME_USD = 50_000_000   # $50M 24h volume minimum
 CONSECUTIVE_LOSS_BENCH = 3    # bench after this many consecutive losses
 MIN_BENCH_HOURS = 48          # cooldown before re-evaluation
@@ -81,6 +111,46 @@ def _normalize_futures_symbol(raw_symbol: str) -> str:
     """ccxt unified futures symbols look like 'BTC/USDT:USDT' — strip the
     settlement suffix to match this project's 'BTC/USDT' convention."""
     return raw_symbol.split(":", 1)[0]
+
+
+# Standalone, keyless ccxt client for Binance's MAINNET public futures
+# tickers — used ONLY to source scanner liquidity/spread/ranking data when
+# running on testnet (whose ticker volume is inflated/artificial). This never
+# touches execution: it has no API keys, places no orders, and is entirely
+# separate from the adapter used for trading. Built lazily and cached at
+# module level since constructing a ccxt client has a small fixed cost and
+# the scanner only runs a handful of times per hour.
+_mainnet_ticker_client = None
+
+
+def _get_mainnet_ticker_client():
+    global _mainnet_ticker_client
+    if _mainnet_ticker_client is None:
+        import ccxt
+        # No apiKey/secret — fetch_tickers() is public market data, and
+        # omitting keys guarantees this client can never place an order.
+        _mainnet_ticker_client = ccxt.binanceusdm({
+            "enableRateLimit": True,
+            "timeout": 15000,
+            "options": {"fetchCurrencies": False},
+        })
+    return _mainnet_ticker_client
+
+
+def fetch_mainnet_liquidity_tickers() -> dict | None:
+    """Binance mainnet USDT-M perpetual tickers (quote volume, bid/ask,
+    24h % change), independent of whatever exchange/testnet the trading
+    adapter is configured for. Returns None on any failure so callers can
+    fall back to the adapter's own tickers."""
+    try:
+        client = _get_mainnet_ticker_client()
+        tickers = client.fetch_tickers()
+        if not tickers:
+            return None
+        return tickers
+    except Exception as e:
+        log.warning(f"Mainnet liquidity ticker fetch failed, will fall back to adapter tickers: {e}")
+        return None
 
 
 def _is_index_product(base: str) -> bool:
@@ -133,10 +203,47 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
 
     Raises on any hard failure (network, adapter doesn't support it, etc.) —
     callers are expected to catch and fall back to CANDIDATE_SYMBOLS.
+
+    Liquidity/ranking data source (quality_score inputs: quote volume, bid/ask
+    spread, 24h % change) is decoupled from tradability. Candidates are always
+    enumerated from the ADAPTER's tickers (i.e. only symbols actually tradable
+    on the configured — possibly testnet — exchange), so execution is never
+    affected. But when running on Binance testnet, whose ticker volume is
+    inflated/artificial, the *numbers* used to filter/rank each candidate are
+    sourced from Binance's real MAINNET public tickers instead (see
+    fetch_mainnet_liquidity_tickers) — a symbol only earns a shortlist slot if
+    it looks like a real, liquid market, not a testnet volume artifact. Falls
+    back to the adapter's own ticker data if the mainnet fetch fails.
     """
     tickers = adapter.fetch_all_tickers()
     if not tickers:
         raise RuntimeError("fetch_all_tickers returned no data")
+
+    liquidity_source = "adapter"
+    liquidity_tickers = tickers
+    use_mainnet = (
+        settings.market_scan_use_mainnet_liquidity
+        and settings.exchange == "binance"
+        and settings.binance_testnet
+    )
+    if use_mainnet:
+        mainnet_tickers = fetch_mainnet_liquidity_tickers()
+        if mainnet_tickers:
+            liquidity_tickers = mainnet_tickers
+            liquidity_source = "mainnet_public"
+            log.info(
+                f"Market scan: sourcing liquidity/ranking from Binance MAINNET public "
+                f"tickers ({len(mainnet_tickers)} symbols) — execution stays on testnet"
+            )
+        else:
+            log.warning(
+                "Market scan: mainnet liquidity fetch failed this cycle — "
+                "falling back to the adapter's own (testnet) ticker data"
+            )
+
+    liquidity_by_symbol: dict[str, dict] = {
+        _normalize_futures_symbol(raw): t for raw, t in liquidity_tickers.items()
+    }
 
     exclude = {s.strip().upper() for s in settings.market_scan_exclude_symbols.split(",") if s.strip()}
     market_cap_symbols = (
@@ -147,11 +254,15 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
 
     rejected = {
         "not_usdt_perp": 0, "stablecoin": 0, "leveraged": 0, "index_product": 0,
-        "excluded": 0, "low_volume": 0, "wide_spread": 0, "bad_data": 0, "not_top_market_cap": 0,
+        "excluded": 0, "single_letter_base": 0, "not_top_market_cap": 0,
+        "low_volume": 0, "wide_spread": 0, "abnormal_move": 0, "bad_data": 0,
     }
 
     candidates = []
-    for raw_symbol, ticker in tickers.items():
+    # Enumerate TRADABLE symbols (the adapter's own tickers) so nothing gets
+    # shortlisted that the configured exchange can't actually execute — only
+    # the quality numbers below come from the liquidity source.
+    for raw_symbol in tickers:
         symbol = _normalize_futures_symbol(raw_symbol)
         if "/" not in symbol or not symbol.endswith("/USDT"):
             rejected["not_usdt_perp"] += 1
@@ -170,12 +281,23 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
         if symbol.upper() in exclude:
             rejected["excluded"] += 1
             continue
+        if settings.market_scan_exclude_single_letter_bases and len(base) == 1:
+            rejected["single_letter_base"] += 1
+            continue
         if market_cap_symbols is not None and base not in market_cap_symbols:
             rejected["not_top_market_cap"] += 1
             continue
 
-        quote_volume = ticker.get("quoteVolume")
-        last_price = ticker.get("last") or ticker.get("close")
+        # Quality data for this symbol: from the liquidity source if it has a
+        # counterpart there (e.g. real mainnet data), else rejected outright —
+        # a symbol with no real-market counterpart can't be judged as liquid.
+        quality_ticker = liquidity_by_symbol.get(symbol)
+        if quality_ticker is None:
+            rejected["bad_data"] += 1
+            continue
+
+        quote_volume = quality_ticker.get("quoteVolume")
+        last_price = quality_ticker.get("last") or quality_ticker.get("close")
         if not quote_volume or not last_price or float(last_price) <= 0:
             rejected["bad_data"] += 1
             continue
@@ -184,7 +306,7 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
             rejected["low_volume"] += 1
             continue
 
-        bid, ask = ticker.get("bid"), ticker.get("ask")
+        bid, ask = quality_ticker.get("bid"), quality_ticker.get("ask")
         spread_pct = None
         if bid and ask and bid > 0:
             spread_pct = (float(ask) - float(bid)) / ((float(ask) + float(bid)) / 2) * 100
@@ -192,11 +314,19 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
                 rejected["wide_spread"] += 1
                 continue
 
-        pct_change = ticker.get("percentage")
+        pct_change_raw = quality_ticker.get("percentage")
+        pct_change = float(pct_change_raw) if pct_change_raw is not None else 0.0
+        # Abnormal event-driven moves rejected BEFORE ranking — not
+        # representative of this bot's trend/mean-reversion baseline,
+        # regardless of how liquid the symbol otherwise is.
+        if abs(pct_change) > settings.market_scan_max_abs_24h_change_pct:
+            rejected["abnormal_move"] += 1
+            continue
+
         candidates.append({
             "symbol": symbol,
             "quote_volume": quote_volume,
-            "pct_change": float(pct_change) if pct_change is not None else 0.0,
+            "pct_change": pct_change,
             "spread_pct": spread_pct,
         })
 
@@ -206,12 +336,14 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
             vol_score = c["quote_volume"] / max_vol
             # Momentum is a tiebreaker/boost, not the primary sort key —
             # liquidity is the real gate, a volatile illiquid coin is still
-            # a bad candidate.
+            # a bad candidate. Abnormal movers are already excluded above,
+            # so this only ranks ordinary/healthy momentum among survivors.
             momentum_score = min(abs(c["pct_change"]) / 20.0, 1.0)
-            c["score"] = vol_score * 0.8 + momentum_score * 0.2
+            c["score"] = round(vol_score * 0.8 + momentum_score * 0.2, 4)
         candidates.sort(key=lambda c: c["score"], reverse=True)
 
-    selected = [c["symbol"] for c in candidates[: settings.market_scan_top_n]]
+    selected_candidates = candidates[: settings.market_scan_top_n]
+    selected = [c["symbol"] for c in selected_candidates]
 
     if settings.market_scan_include_fixed_majors:
         majors = [m.strip() for m in settings.market_scan_fixed_majors.split(",") if m.strip()]
@@ -221,11 +353,14 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
         "scanned": len(tickers),
         "eligible": len(candidates),
         "selected_count": len(selected),
+        "active_limit": MAX_ACTIVE,
+        "liquidity_source": liquidity_source,
         "rejected": rejected,
+        "selected_detail": selected_candidates,  # [{symbol, quote_volume, pct_change, spread_pct, score}]
         "scanned_at": datetime.now(timezone.utc).isoformat(),
     }
     log.info(
-        f"Market scan: {len(tickers)} tickers -> {len(candidates)} eligible -> "
+        f"Market scan ({liquidity_source}): {len(tickers)} tickers -> {len(candidates)} eligible -> "
         f"{len(selected)} selected | rejected: {rejected}"
     )
     log.info(f"Market scan selected: {', '.join(selected[:15])}{' ...' if len(selected) > 15 else ''}")
@@ -316,8 +451,20 @@ class CoinRoster:
         return dict(self._scan_meta)
 
     def _fill_candidate_slots(self) -> bool:
-        changed = False
         pool = self.candidate_pool()
+        if settings.dynamic_market_scan and self._scan_meta.get("status") == "ok" and pool:
+            target = [s for s in pool if s not in self.benched][:MAX_ACTIVE]
+            if target != self.active:
+                old_count = len(self.active)
+                self.active = target
+                log.info(
+                    "Active roster synced to dynamic shortlist: "
+                    f"{old_count} -> {len(self.active)} symbols"
+                )
+                return True
+            return False
+
+        changed = False
         for symbol in pool:
             if len(self.active) >= MAX_ACTIVE:
                 break
@@ -409,6 +556,10 @@ class CoinRoster:
 
         # 0. Refresh the dynamic market scan (forced, once a day minimum)
         self.refresh_market_scan(force=True)
+        if self._fill_candidate_slots():
+            messages.append(
+                f"Active roster synced to dynamic shortlist ({len(self.active)}/{MAX_ACTIVE})"
+            )
 
         # 1. Unbenched coins whose cooldown expired
         now = datetime.now(timezone.utc)

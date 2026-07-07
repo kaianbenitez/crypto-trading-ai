@@ -140,6 +140,23 @@ class Settings:
     )
     market_scan_market_cap_refresh_hours: int = int(os.getenv("MARKET_SCAN_MARKET_CAP_REFRESH_HOURS", "12"))
 
+    # On testnet, the exchange's own ticker volume/spread is inflated/weird
+    # (thin, artificial liquidity), so ranking off it can shortlist symbols
+    # that wouldn't make sense as real trades. When true and exchange is
+    # Binance, the scanner instead sources quote volume/spread/24h change
+    # from Binance's MAINNET public tickers (no keys needed, read-only) for
+    # candidate selection/ranking only — order placement/execution is
+    # unaffected and still goes through the configured (testnet) adapter.
+    # Falls back to the adapter's own tickers if the mainnet fetch fails.
+    market_scan_use_mainnet_liquidity: bool = os.getenv("MARKET_SCAN_USE_MAINNET_LIQUIDITY", "true").lower() == "true"
+    # Reject symbols with an abnormal 24h move (event-driven spikes/crashes)
+    # by default — not representative of the trend/mean-reversion baseline
+    # this bot trades, regardless of how liquid they are.
+    market_scan_max_abs_24h_change_pct: float = float(os.getenv("MARKET_SCAN_MAX_ABS_24H_CHANGE_PCT", "35"))
+    # Off by default — single-letter bases (e.g. "M/USDT") aren't inherently
+    # bad, but this is available if they turn out to be noisy in practice.
+    market_scan_exclude_single_letter_bases: bool = os.getenv("MARKET_SCAN_EXCLUDE_SINGLE_LETTER_BASES", "false").lower() == "true"
+
     # Extra cost/edge gates layered on top of MIN_EDGE_AFTER_COST_R — these
     # add rejection criteria only, they never change position size.
     max_estimated_cost_r: float = float(os.getenv("MAX_ESTIMATED_COST_R", "0.20"))

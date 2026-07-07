@@ -3,6 +3,40 @@
 All notable changes to this project are logged here, most recent first.
 Format is informal — one entry per meaningful change, not strict Keep a Changelog.
 
+## 2026-07-09
+
+- **Fixed the dynamic scanner shortlisting testnet-volume artifacts.** On
+  Binance testnet, ticker volume is inflated/artificial (confirmed live: SUN
+  showed $97M testnet volume vs $3.9M real mainnet volume — a 25x inflation;
+  AERO, GRASS, MORPHO, and PENDLE were 40-80x inflated; even BTC/USDT itself
+  showed only $25M on testnet, below the $50M floor). Candidates are still
+  enumerated from the exchange the bot actually trades on (nothing shortlisted
+  that testnet can't execute), but the *quality numbers* now come from
+  Binance's real mainnet public tickers:
+  - `MARKET_SCAN_USE_MAINNET_LIQUIDITY` (default true) — when on Binance
+    testnet, quote volume/bid-ask spread/24h % change for filtering and
+    ranking are sourced from Binance's MAINNET public tickers (no API keys,
+    read-only, never touches order placement). A symbol with no mainnet
+    counterpart is rejected outright (`bad_data`) rather than trusted on
+    testnet-only numbers. Falls back to the adapter's own tickers (logged
+    clearly) if the mainnet fetch fails. No-op on live trading or non-Binance.
+  - `MARKET_SCAN_MAX_ABS_24H_CHANGE_PCT` (default 35%) — rejects abnormal
+    event-driven movers before ranking (`abnormal_move`), independent of
+    liquidity: confirmed LAB (-53%) and TAC (+69%) both clear the $50M mainnet
+    volume floor but are correctly rejected as abnormal moves.
+  - `MARKET_SCAN_EXCLUDE_SINGLE_LETTER_BASES` (default false, documented) —
+    optional filter for single-letter bases like `M/USDT`.
+  - `scan_status`/`/api/roster` now report `liquidity_source`
+    (`mainnet_public` | `adapter`) and `selected_detail` (per-candidate
+    quote_volume/pct_change/spread_pct/score) alongside the existing
+    rejection-reason counts.
+  - Live validation run (real testnet + real mainnet tickers, 627 scanned):
+    all 7 previously-concerning symbols (SUN, AERO, GRASS, MORPHO, PENDLE,
+    LAB, TAC) now correctly rejected; 32 genuinely liquid symbols selected.
+  - New `tests/smoke_market_scan_mainnet_liquidity.py` (26 checks).
+  - No change to position sizing, max positions, strategy signals, or
+    execution exchange/testnet behavior — scanner candidate-quality only.
+
 ## 2026-07-08
 
 - **Fixed the 30-day validation so its numbers are trustworthy (10 fixes).** An
