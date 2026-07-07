@@ -252,6 +252,120 @@ def strategy_profile(_=Depends(require_session)):
     }
 
 
+@app.get("/api/strategy")
+def strategy(_=Depends(require_session)):
+    """Live strategy configuration for the dashboard. This is intentionally
+    assembled from settings/profile so the page follows .env changes after a
+    service restart instead of becoming static documentation."""
+    from agent.strategy.profiles import get_profile
+
+    p = get_profile(settings.strategy_profile)
+    fixed_majors = [s.strip() for s in settings.market_scan_fixed_majors.split(",") if s.strip()]
+    excluded = [s.strip() for s in settings.market_scan_exclude_symbols.split(",") if s.strip()]
+
+    def cfg(name, default=None):
+        return getattr(settings, name, default)
+
+    return {
+        "profile": {
+            "name": p.name,
+            "decision_active": p.decision_active_modules,
+            "observe_only": p.observe_only_modules,
+        },
+        "execution": {
+            "exchange": settings.exchange,
+            "testnet": settings.binance_testnet if settings.exchange == "binance" else settings.bybit_testnet,
+            "timeframe": "1h",
+            "evaluation": "once per fresh closed 1h candle per active coin",
+            "mtf_timeframes": ["15m", "1h", "4h", "1d", "1w"],
+        },
+        "scanner": {
+            "enabled": cfg("dynamic_market_scan", False),
+            "top_n": cfg("market_scan_top_n", 15),
+            "active_symbols": cfg("market_scan_active_symbols", cfg("market_scan_top_n", 15)),
+            "refresh_minutes": cfg("market_scan_refresh_minutes", 60),
+            "min_quote_volume": cfg("market_scan_min_quote_volume", 0),
+            "max_spread_pct": cfg("market_scan_max_spread_pct", 0),
+            "max_abs_24h_change_pct": cfg("market_scan_max_abs_24h_change_pct", 0),
+            "use_mainnet_liquidity": cfg("market_scan_use_mainnet_liquidity", False),
+            "require_market_cap_rank": cfg("market_scan_require_market_cap_rank", False),
+            "min_market_cap_rank": cfg("market_scan_min_market_cap_rank", 0),
+            "include_fixed_majors": cfg("market_scan_include_fixed_majors", False),
+            "fixed_majors": fixed_majors,
+            "excluded_symbols": excluded,
+        },
+        "signals": {
+            "regime_rule": "ADX: trending vs ranging",
+            "trend_following": [
+                "EMA fast/slow alignment or fresh crossover",
+                "MACD confirmation",
+                "ADX trend strength",
+                "volume confirmation",
+            ],
+            "mean_reversion": [
+                "RSI extreme",
+                "Bollinger Band touch",
+                "volume confirmation for weaker single-condition setups",
+            ],
+            "hard_blocks": [
+                "ATR shock filter",
+                "MTF opposite bias",
+                "EV below cost-aware floor",
+                "thin reward versus estimated cost",
+                "same-coin re-entry guard",
+                "portfolio or same-direction risk cap",
+            ],
+        },
+        "risk": {
+            "bankroll_usdt": cfg("bankroll_usdt", 0),
+            "bankroll_mode": cfg("bankroll_mode", "static"),
+            "max_risk_per_trade_pct": cfg("max_risk_per_trade_pct", 0),
+            "max_concurrent_positions": cfg("max_concurrent_positions", 0),
+            "split_risk_across_slots": cfg("split_risk_across_slots", False),
+            "max_portfolio_risk_pct": cfg("max_portfolio_risk_pct", 0),
+            "max_same_direction_risk_pct": cfg("max_same_direction_risk_pct", 0),
+            "min_entry_risk_pct": cfg("min_entry_risk_pct", 0),
+            "default_leverage": cfg("default_leverage", 1),
+            "max_leverage": cfg("max_leverage", 1),
+            "confidence_risk_scaling": cfg("confidence_risk_scaling", False),
+            "confidence_full_risk_at": cfg("confidence_full_risk_at", 0),
+            "risk_tier_mode": cfg("risk_tier_mode", "fixed"),
+            "risk_base_pct": cfg("risk_base_pct", 0),
+            "risk_recovery_pct": cfg("risk_recovery_pct", 0),
+            "risk_drawdown_pct": cfg("risk_drawdown_pct", 0),
+            "risk_proven_pct": cfg("risk_proven_pct", 0),
+            "daily_drawdown_pct": cfg("max_daily_drawdown_pct", 0),
+        },
+        "costs": {
+            "taker_fee_pct": cfg("taker_fee_pct", 0),
+            "slippage_pct": cfg("slippage_pct", 0),
+            "min_live_ev_r": cfg("min_live_ev_r", 0),
+            "min_edge_after_cost_r": cfg("min_edge_after_cost_r", 0),
+            "max_estimated_cost_r": cfg("max_estimated_cost_r", 0),
+            "min_net_ev_after_cost_r": cfg("min_net_ev_after_cost_r", 0),
+            "min_expected_reward_cost_multiple": cfg("min_expected_reward_cost_multiple", 0),
+            "min_stop_cost_multiple": cfg("min_stop_cost_multiple", 0),
+        },
+        "management": {
+            "stop_loss": "exchange-side SL placed immediately after entry",
+            "take_profit": "exchange-side TP placed immediately after entry",
+            "regular_trailing": "enabled after +1R; trend trades use ATR trailing around 2.2x ATR",
+            "trailing_take_profit": "runner mode can replace fixed TP after about +1.6R on strong trend trades",
+            "max_hold": "force-close after 48h",
+            "reentry": {
+                "max_trades_per_symbol_per_day": cfg("reentry_max_trades_per_symbol_per_day", 0),
+                "min_ev_multiplier": cfg("reentry_min_ev_multiplier", 0),
+            },
+        },
+        "context": {
+            "news_enabled": cfg("news_enabled", False),
+            "news_provider": cfg("news_provider", "none"),
+            "coin_digest_hour_ph": cfg("coin_digest_hour_ph", 21),
+            "telegram_close_lessons": cfg("telegram_show_close_lessons", False),
+        },
+    }
+
+
 @app.get("/api/changelog")
 def changelog(_=Depends(require_session)):
     """Raw contents of the repo's CHANGELOG.md for the dashboard's Changelog page."""

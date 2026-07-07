@@ -1344,6 +1344,15 @@ def run():
                             f"({risk_profile.tier}, {settings.max_concurrent_positions} slots)"
                         )
 
+                    entry_candle_ts = int(row.get("timestamp") or now_candle)
+                    signal.indicator_snapshot["entry_candle_timestamp"] = entry_candle_ts
+                    signal.indicator_snapshot["entry_candle_time_utc"] = datetime.fromtimestamp(
+                        entry_candle_ts / 1000,
+                        tz=timezone.utc,
+                    ).isoformat()
+                    signal.indicator_snapshot["entry_candle_close"] = round(float(row.get("close") or 0), 8)
+                    signal.indicator_snapshot["entry_cycle_time_utc"] = now_utc.isoformat()
+
                     cost_r, min_required_ev = _cost_context_r(row, signal.side, trade_params)
                     signal.indicator_snapshot["estimated_cost_r"] = round(cost_r, 3)
                     signal.indicator_snapshot["min_required_ev_r"] = round(min_required_ev, 3)

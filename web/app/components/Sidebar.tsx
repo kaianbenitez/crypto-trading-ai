@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Gauge, Broadcast, BookOpen, Eye, ShieldWarning, Brain, GearSix,
-  ClockCounterClockwise, ArrowSquareOut, SignOut, List, X,
+  ClockCounterClockwise, ArrowSquareOut, SignOut, List, X, ChartLineUp,
 } from "@phosphor-icons/react";
 import { AgentStatus, api } from "@/lib/api";
 
@@ -41,6 +41,7 @@ const NAV_ITEMS = [
   { label: "Dashboard",  href: "/",         icon: Gauge },
   { label: "Live Log",   href: "/log",      icon: Broadcast },
   { label: "Journal",    href: "/journal",  icon: BookOpen },
+  { label: "Strategy",   href: "/strategy", icon: ChartLineUp },
   { label: "Coin Watch", href: "/coins",    icon: Eye },
   { label: "Risk",       href: "/risk",     icon: ShieldWarning },
   { label: "Adaptive",   href: "/adaptive", icon: Brain },
