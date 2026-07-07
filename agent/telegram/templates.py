@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from agent.config.settings import settings
 from agent.dashboard.plain_english import (
     friendly_regime,
     friendly_strategy,
@@ -68,7 +69,7 @@ def closed(trade, session=None) -> str:
     lines = [f"{icon} CLOSED | {n.symbol} | {outcome_label} | {pnl:+.2f} USDT", ""]
     if n.failure_line:
         lines += ["Why it failed:" if n.outcome == "loss" else "Result:", n.failure_line, ""]
-    if n.lesson_line:
+    if settings.telegram_show_close_lessons and n.lesson_line:
         lines += ["Lesson:", n.lesson_line, ""]
 
     r_txt = f"{n.r_multiple:+.1f}R" if n.r_multiple is not None else "—"

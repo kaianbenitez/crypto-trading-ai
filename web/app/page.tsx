@@ -40,6 +40,19 @@ const TRADE_REGIME_LABEL: Record<string, string> = {
 function friendlyStrategy(s?: string) { return s ? (STRATEGY_LABEL[s] ?? s.replace(/_/g, " ")) : "—"; }
 function friendlyTradeRegime(r?: string) { return r ? (TRADE_REGIME_LABEL[r] ?? r.replace(/_/g, " ")) : "—"; }
 
+function openDuration(openedAt: string) {
+  const opened = new Date(openedAt).getTime();
+  if (!Number.isFinite(opened)) return "Open";
+  const totalMinutes = Math.max(0, Math.floor((Date.now() - opened) / 60000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) return `${days}d ${hours}h open`;
+  if (hours > 0) return `${hours}h ${minutes.toString().padStart(2, "0")}m open`;
+  return `${Math.max(1, minutes)}m open`;
+}
+
 // ── PnlBar: visual range bar for entry/SL/TP ────────────────────────────────
 function PnlBar({ trade, currentPrice, tall = false }: { trade: Pick<Trade, "entry_price" | "stop_loss" | "take_profit" | "side">; currentPrice?: number; tall?: boolean }) {
   const { entry_price, stop_loss, take_profit, side } = trade;
@@ -135,7 +148,7 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
           <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
         </div>
         <span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
-          Opened {new Date(trade.opened_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          {openDuration(trade.opened_at)}
         </span>
       </div>
 
@@ -250,7 +263,7 @@ function OpenPosition({ trade }: { trade: Trade }) {
         {[
           { label: "Leverage", value: `${trade.leverage}×` },
           { label: "Qty", value: trade.qty ? price4.format(trade.qty) : "—" },
-          { label: "Opened", value: new Date(trade.opened_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) },
+          { label: "Open for", value: openDuration(trade.opened_at).replace(" open", "") },
         ].map(({ label, value }) => (
           <div key={label} style={{ background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
             <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 2 }}>{label}</div>
