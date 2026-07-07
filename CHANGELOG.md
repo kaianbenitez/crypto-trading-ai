@@ -5,6 +5,17 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Reduced dashboard eye strain and fixed a contrast/false-signal issue.**
+  Theme tokens (`--bg`/`--surface`/`--surface2`/`--surface3`/`--border`/
+  `--border2`) moved off near-black to cut text halation; `--muted` lifted
+  for contrast; the micro-typography floor raised a step across the board
+  (11→12px, 12→13px, 13→14px) since this is a dense surface read quickly and
+  often. The open-position reasoning block now shows a compact strategy/
+  regime tag row up front, with the full thesis/why-accepted/invalidation
+  text collapsed behind a "View Full Trade Thesis" disclosure. The dashboard's
+  "Macro" stat card no longer gets a green accent for a `normal` regime —
+  that read as a false positive signal for a neutral condition.
+
 - **Merged the two open-position card layouts into one, and collapsed Coin
   Watch on the dashboard.** Follow-up to the critique's remaining P0/P2
   findings. `DetailedOpenPosition` and `OpenPosition` used to be entirely

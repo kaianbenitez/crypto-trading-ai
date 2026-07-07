@@ -185,10 +185,18 @@ function OpenPositionCard({ trade, detail, payload, live }: { trade: Trade; deta
 
         {note && (
           <details style={{ paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-            <summary className="reasoning-toggle" style={{ cursor: "pointer", color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              Reasoning
+            <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+              <span style={{ background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: "3px 8px", fontSize: "var(--text-2xs)", color: "var(--muted)" }}>
+                ⚙️ {friendlyStrategy(trade.strategy_name)}
+              </span>
+              <span style={{ background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: "3px 8px", fontSize: "var(--text-2xs)", color: "var(--muted)" }}>
+                📈 {friendlyTradeRegime(trade.regime)}
+              </span>
+            </div>
+            <summary className="reasoning-toggle" style={{ cursor: "pointer", color: "var(--accent)", fontSize: "var(--text-2xs)", fontWeight: 700, letterSpacing: "0.02em" }}>
+              View Full Trade Thesis
             </summary>
-            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6, background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: 10 }}>
               <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.45 }}>
                 {note}
               </div>
@@ -480,7 +488,7 @@ function Dashboard() {
             <StatCard key="roi" label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub={summary ? `${summary.total_trades} closed trades, all-time` : "all-time"} loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />,
             <StatCard key="winrate" label="Win Rate" value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"} sub={summary ? `${summary.total_trades} total` : undefined} loading={loading} accent={summary ? (summary.win_rate_pct >= 50 ? "var(--green)" : "var(--amber)") : undefined} />,
             <StatCard key="open" label="Open" value={summary ? String(summary.open_positions) : "—"} color={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} sub="positions" loading={loading} accent={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} />,
-            <StatCard key="macro" label="Macro" value={regimeMeta.label} color={regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regimeMeta.color} />,
+            <StatCard key="macro" label="Macro" value={regimeMeta.label} color={regime === "normal" ? undefined : regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regime === "normal" ? "var(--border2)" : regimeMeta.color} />,
           ].map((el, i) => (
             <div key={el.key} className="rise-in" style={{ animationDelay: `${i * 40}ms` }}>{el}</div>
           ))}

@@ -1,18 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  --bg:        #080a0d;
-  --surface:   #0e1117;
-  --surface2:  #141820;
-  --surface3:  #1a2030;
-  --border:    #1e2533;
-  --border2:   #27304a;
+  /* Shifted off absolute black to reduce text halation (bright text on pure
+     #000/near-#000 causes visible "glow"/ghosting for many readers, worse
+     at night). These carry a faint blue tint consistent with --accent. */
+  --bg:        #0a0d14;
+  --surface:   #111622;
+  --surface2:  #181f30;
+  --surface3:  #202b40;
+  --border:    #1f293e;
+  --border2:   #2d3b54;
   --text:      #e2e6f0;
   /* Pre-existing #4a5570 measured ~2.4:1 against --surface/--surface2 — fails
      WCAG AA (4.5:1) for the body-size secondary text it's used for
      everywhere (labels, meta, timestamps). Lightened to pass comfortably
      (~5.6-6:1) while staying visually "muted" relative to --text. */
-  --muted:     #8b94a8;
+  --muted:     #9aa5be;
   --accent:    #3b82f6;
   --accent2:   #6366f1;
   --green:     #22c55e;
@@ -31,9 +34,11 @@
   --gradient-caution: linear-gradient(135deg, var(--amber) 0%, var(--amber2) 100%);
 
   /* ---- Type scale: fixed rem steps, ratio ~1.13-1.2 (product UI, not fluid) ---- */
-  --text-2xs:  0.6875rem; /* 11px — micro labels, badge text */
-  --text-xs:   0.75rem;   /* 12px — secondary text, meta */
-  --text-sm:   0.8125rem; /* 13px — body default */
+  /* Floor lifted a step (was 11/12/13px) — this is a dense monitoring surface
+     read quickly and often; sub-12px body/meta text causes squinting fatigue. */
+  --text-2xs:  0.75rem;   /* 12px — micro labels, badge text */
+  --text-xs:   0.8125rem; /* 13px — secondary text, meta */
+  --text-sm:   0.875rem;  /* 14px — body default */
   --text-base: 0.875rem;  /* 14px — emphasized body, card titles */
   --text-md:   0.9375rem; /* 15px — sub-headings */
   --text-lg:   1.125rem;  /* 18px */
