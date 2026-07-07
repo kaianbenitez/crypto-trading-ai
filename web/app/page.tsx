@@ -8,7 +8,6 @@ import { money, pct, pnlColor, price4 } from "@/lib/format";
 import AuthGate from "./components/AuthGate";
 import Sidebar from "./components/Sidebar";
 import CoinLogo from "./components/CoinLogo";
-import CoinDigestCard from "./components/CoinDigestCard";
 import { Card, Badge, Button, StatCard } from "./components/ui";
 
 // TradingView chart link for a symbol, opened in a new tab from the coin logo/name.
@@ -110,8 +109,11 @@ function unrealizedPct(trade: Pick<Trade, "side" | "entry_price">, currentPrice?
   return ((currentPrice - trade.entry_price) / trade.entry_price) * direction * 100;
 }
 
-function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionDetail; payload?: CandlePayload; live?: LivePosition }) {
-  const trade = detail.trade;
+// One canonical open-position card. `detail` (the enriched reasoning payload)
+// is optional — when it's missing (API hiccup, or this trade just isn't in
+// that response yet) the card falls back to the plain trade fields instead
+// of swapping to a structurally different layout. Same shape either way.
+function OpenPositionCard({ trade, detail, payload, live }: { trade: Trade; detail?: OpenPositionDetail; payload?: CandlePayload; live?: LivePosition }) {
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   // Prefer the exchange's own mark price / unrealized PnL / ROI — they account
   // for trading fees and break-even price, unlike the (close - entry) * qty
@@ -120,7 +122,7 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
   const openPct = live?.roi_pct ?? unrealizedPct(trade, currentPrice);
   // Show every reason the agent gathered, not just the first — a single
   // line was always the same generic regime restatement on every trade.
-  const note = detail.reasoning.thesis.join(" ");
+  const note = detail ? detail.reasoning.thesis.join(" ") : specificReasoning(trade.entry_reasoning);
   const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
   const riskPct = typeof snapshot?.actual_risk_pct === "number" ? snapshot.actual_risk_pct : undefined;
 
@@ -153,10 +155,7 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
           <div>
             <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>Unrealized P&L</div>
             <div style={{ color: openPct === undefined ? "var(--muted)" : pnlColor(openPct), fontSize: "var(--text-2xl)", fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-              {openPct === undefined ? "Loading" : `${openPct >= 0 ? "+" : ""}${openPct.toFixed(2)}%`}
-            </div>
-            <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", marginTop: 5 }}>
-              since entry
+              {openPct === undefined ? "n/a" : `${openPct >= 0 ? "+" : ""}${openPct.toFixed(2)}%`}
             </div>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -169,7 +168,7 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
 
         <div
           style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 8 }}
-          title={riskPct !== undefined ? `${riskPct.toFixed(2)}% of bankroll risked · qty ${price4.format(trade.qty)}` : undefined}
+          title={riskPct !== undefined ? `${riskPct.toFixed(2)}% of bankroll risked · qty ${price4.format(trade.qty)} · ${trade.leverage}× leverage` : undefined}
         >
           <span style={{ color: "var(--red)" }}>SL {price4.format(trade.stop_loss)}</span>
           {" · "}
@@ -178,7 +177,7 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
           <span style={{ color: "var(--green)" }}>TP {price4.format(trade.take_profit)}</span>
         </div>
 
-        {detail.reasoning.weakness && (
+        {detail?.reasoning.weakness && (
           <div style={{ color: "var(--amber)", fontSize: "var(--text-2xs)", lineHeight: 1.4, display: "flex", gap: 4, alignItems: "flex-start", marginBottom: note ? 8 : 0 }}>
             <WarningCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> {detail.reasoning.weakness}
           </div>
@@ -193,15 +192,17 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
               <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.45 }}>
                 {note}
               </div>
-              {detail.reasoning.why_accepted.length > 0 && (
+              {detail && detail.reasoning.why_accepted.length > 0 && (
                 <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
                   Why accepted: {detail.reasoning.why_accepted.join(" ")}
                 </div>
               )}
-              <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
-                Invalidation: {detail.reasoning.invalidation}
-              </div>
-              {detail.reasoning.past_context && (
+              {detail && (
+                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
+                  Invalidation: {detail.reasoning.invalidation}
+                </div>
+              )}
+              {detail?.reasoning.past_context && (
                 <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
                   Past: {detail.reasoning.past_context}
                 </div>
@@ -210,68 +211,6 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
           </details>
         )}
       </div>
-    </div>
-  );
-}
-
-function OpenPosition({ trade }: { trade: Trade }) {
-  const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
-  const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
-  const riskPct = typeof snapshot?.actual_risk_pct === "number" ? snapshot.actual_risk_pct : undefined;
-  return (
-    <div className="ui-card" style={{ padding: "16px 20px", borderColor: `color-mix(in oklab, ${sideColor} 20%, var(--border))` }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-        <a
-          href={tradingViewUrl(trade.symbol)}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={`Open ${trade.symbol} chart on TradingView`}
-          style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit" }}
-        >
-          <CoinLogo symbol={trade.symbol} size={30} />
-          <div>
-            <div style={{ fontWeight: 700, fontSize: "var(--text-md)" }}>{trade.symbol.replace("/USDT", "")}<span style={{ color: "var(--muted)", fontWeight: 400, fontSize: "var(--text-xs)" }}>/USDT</span></div>
-            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
-          </div>
-        </a>
-        <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
-        <Badge color="var(--amber)">OPEN</Badge>
-      </div>
-
-      {/* Range bar */}
-      <PnlBar trade={trade} />
-      <div
-        style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-2xs)", color: "var(--muted)", marginBottom: 10 }}
-        title={riskPct !== undefined ? `${riskPct.toFixed(2)}% of bankroll risked · qty ${price4.format(trade.qty)}` : undefined}
-      >
-        <span>SL {price4.format(trade.stop_loss)}</span>
-        <span style={{ color: "var(--accent)" }}>Entry {price4.format(trade.entry_price)}</span>
-        <span>TP {price4.format(trade.take_profit)}</span>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-        {[
-          { label: "Leverage", value: `${trade.leverage}×` },
-          { label: "Qty", value: trade.qty ? price4.format(trade.qty) : "—" },
-          { label: "Open for", value: openDuration(trade.opened_at).replace(" open", "") },
-        ].map(({ label, value }) => (
-          <div key={label} style={{ background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
-            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 2 }}>{label}</div>
-            <div style={{ fontSize: "var(--text-sm)", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{value}</div>
-          </div>
-        ))}
-      </div>
-
-      {trade.entry_reasoning.length > 0 && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
-          <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 3 }}>
-            Thesis
-          </div>
-          <div style={{ color: "var(--text)", fontSize: "var(--text-2xs)", lineHeight: 1.5 }}>
-            {specificReasoning(trade.entry_reasoning)}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -328,6 +267,27 @@ function TradeRow({ trade }: { trade: Trade }) {
         {footerNote}
       </div>
     </Link>
+  );
+}
+
+// ── coin watch ticker: compact daily read, full cards live on /coins ────────
+// This refreshes once a day (~9 PM PH) while everything else on the dashboard
+// refreshes every 15s — it doesn't earn the same visual weight as live data,
+// so it's a single scannable row here; the full digest cards are one click away.
+function CoinWatchTicker({ digest }: { digest: CoinDigest }) {
+  const coin = digest.symbol.replace("/USDT", "");
+  const change = digest.price_change_pct_24h;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "var(--surface2)", borderRadius: "var(--radius-sm)", fontSize: "var(--text-2xs)" }}>
+      <CoinLogo symbol={digest.symbol} size={16} />
+      <span style={{ fontWeight: 700 }}>{coin}</span>
+      {change !== null && <span style={{ color: pnlColor(change), fontWeight: 600 }}>{pct(change)}</span>}
+      {digest.watching_side && digest.watch_low !== null && digest.watch_high !== null && (
+        <span style={{ color: "var(--muted)" }}>
+          watching <span style={{ color: digest.watching_side === "long" ? "var(--green)" : "var(--red)", fontWeight: 600 }}>{digest.watching_side.toUpperCase()}</span>
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -451,8 +411,13 @@ function Dashboard() {
   }, [status?.checked_at]);
 
   const openTrades   = trades.filter(t => !t.closed_at);
-  const openCount    = positionDetails.length || openTrades.length;
+  const openCount    = openTrades.length;
   const closedTrades = trades.filter(t =>  t.closed_at);
+  const detailByTradeId = useMemo(() => {
+    const map: Record<number, OpenPositionDetail> = {};
+    positionDetails.forEach(d => { map[d.trade.id] = d; });
+    return map;
+  }, [positionDetails]);
   const killActive   = summary?.kill_switch_active;
   const regime       = status?.macro_regime || "normal";
   const regimeMeta   = REGIME_META[regime] || { label: regime, color: "var(--muted)" };
@@ -527,20 +492,17 @@ function Dashboard() {
             <h2 style={{ fontSize: "var(--text-xs)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Open Positions</h2>
             {openCount > 0 && <Badge color="var(--amber)">{openCount}</Badge>}
           </div>
-          {positionDetails.length > 0 ? (
+          {openTrades.length > 0 ? (
             <div className="open-position-list" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 10 }}>
-              {positionDetails.map(d => (
-                <DetailedOpenPosition
-                  key={d.trade.id}
-                  detail={d}
-                  payload={candlePayloads[d.trade.symbol]}
-                  live={livePositions[d.trade.symbol]}
+              {openTrades.map(t => (
+                <OpenPositionCard
+                  key={t.id}
+                  trade={t}
+                  detail={detailByTradeId[t.id]}
+                  payload={candlePayloads[t.symbol]}
+                  live={livePositions[t.symbol]}
                 />
               ))}
-            </div>
-          ) : openTrades.length > 0 ? (
-            <div className="open-position-list" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 10 }}>
-              {openTrades.map(t => <OpenPosition key={t.id} trade={t} />)}
             </div>
           ) : (
             <div className="ui-card" style={{ minHeight: 90, padding: 16, color: "var(--muted)", fontSize: "var(--text-sm)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
@@ -564,20 +526,20 @@ function Dashboard() {
           </div>
         </Card>
 
-        {/* Coin watch: daily price action + agent read + news sentiment per coin */}
-        <div style={{ marginTop: 18 }}>
-          <Card title="Coin Watch" right={<span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>Refreshed daily, ~9 PM PH</span>} noPad>
-            {coinDigests.length > 0 ? (
-              <div style={{ padding: "12px 20px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
-                {coinDigests.map(d => <CoinDigestCard key={d.symbol} digest={d} />)}
-              </div>
-            ) : (
-              <div style={{ padding: "24px 20px", textAlign: "center", color: "var(--muted)", fontSize: "var(--text-sm)" }}>
-                {loading ? "Loading…" : "No digest yet today — the agent builds one for every coin once a day, around 9 PM PH. Check back after the next run."}
-              </div>
-            )}
-          </Card>
-        </div>
+        {/* Coin watch: daily agent read, compact — full cards live on /coins */}
+        {coinDigests.length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <div style={{ marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <h2 style={{ fontSize: "var(--text-xs)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Coin Watch</h2>
+              <Link href="/coins" style={{ color: "var(--accent)", fontSize: "var(--text-2xs)", textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
+                Full read <ArrowSquareOut size={11} />
+              </Link>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {coinDigests.map(d => <CoinWatchTicker key={d.symbol} digest={d} />)}
+            </div>
+          </div>
+        )}
 
       </main>
       </div>

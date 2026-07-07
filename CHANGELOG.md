@@ -5,6 +5,21 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Merged the two open-position card layouts into one, and collapsed Coin
+  Watch on the dashboard.** Follow-up to the critique's remaining P0/P2
+  findings. `DetailedOpenPosition` and `OpenPosition` used to be entirely
+  different components chosen by an all-or-nothing check on whether the
+  `/api/open-positions-detail` response had loaded — so a single slow
+  response could flip *every* open card to the sparser layout at once, and
+  the two layouts had to be learned as separate visual vocabularies. Now
+  there's one `OpenPositionCard`, and each trade independently falls back to
+  its own plain fields if its enriched reasoning isn't in yet, instead of the
+  whole list switching shape together. Leverage was folded into the existing
+  risk/qty tooltip instead of a separate tile. Coin Watch — a once-a-day
+  digest — no longer renders full cards at the same visual weight as the
+  15-second-refresh live data; it's now a compact ticker row linking to the
+  existing `/coins` page for the full read.
+
 - **Trimmed information density on the open-position dashboard cards** (per
   `/impeccable critique` finding a 24/40 design score, driven almost entirely
   by "every card is stuffed to capacity"). The always-on reasoning narrative
