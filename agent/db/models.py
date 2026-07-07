@@ -280,6 +280,7 @@ def _run_lightweight_migrations(engine) -> None:
             "daily_loss_usdt": "REAL",
             "daily_net_pnl_usdt": "REAL",
             "auto_kill_active": "BOOLEAN",
+            "validation_started_at": "DATETIME",
         }
         for col, col_type in new_cols.items():
             if col not in existing_cols:

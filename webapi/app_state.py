@@ -20,6 +20,10 @@ class AgentState(Base):
     daily_loss_usdt = Column(Float, nullable=True)       # gross losses today
     daily_net_pnl_usdt = Column(Float, nullable=True)    # net realized PnL today
     auto_kill_active = Column(Boolean, default=False)    # drawdown-triggered halt
+    # Fixed 30-day validation window anchor — set once, the first time it's
+    # read, so "days elapsed" doesn't reset every time the rolling window
+    # is recomputed and doesn't depend on the first trade ever happening.
+    validation_started_at = Column(DateTime, nullable=True)
 
 
 def get_or_create_state(session) -> AgentState:

@@ -3,6 +3,54 @@
 All notable changes to this project are logged here, most recent first.
 Format is informal — one entry per meaningful change, not strict Keep a Changelog.
 
+## 2026-07-08
+
+- **Fixed the 30-day validation so its numbers are trustworthy (10 fixes).** An
+  evaluation of `live_readiness`/`choose_risk_tier` found the two most important
+  gates were the wrong shape — raw expectancy instead of cost-adjusted, and coin
+  *count* instead of coin *concentration* — plus the reported paper stats were
+  sized off ~$5,000 testnet equity while validated against the $1,000
+  `BANKROLL_USDT` config, silently overstating ROI ~5x. Reporting/validation-only
+  changes — no change to how trades are opened, closed, or sized:
+  - **Bankroll consistency**: ROI%/drawdown% now normalize each trade against
+    its own *snapshotted* `effective_bankroll_usdt` (already recorded at entry),
+    not one static config number. R-multiple is confirmed bankroll-independent.
+    A startup warning fires when configured bankroll and live equity diverge
+    past `BANKROLL_DIVERGENCE_WARN_PCT` (default 20%).
+  - **Cost-adjusted expectancy is now the primary gate** (`RISK_PROVEN_MIN_NET_R_AFTER_COST`,
+    default +0.10R) — promotion fails if net-after-cost is weak even when raw
+    P&L/expectancy is positive. Raw expectancy must also now exceed the
+    measured average cost R, not just clear a fixed floor.
+  - **Concentration gate replaces the coin-count check**: P&L-excluding-best-coin,
+    excluding-top-2-coins, excluding-best-trade, top-coin contribution %, and
+    top-3-trades contribution %, each with a pass/fail reason
+    (`RISK_PROVEN_MAX_TOP_COIN_PCT`, default 50%). Fails correctly on a single
+    coin whose P&L exceeds the account's total.
+  - **Calendar-time gate** (`RISK_PROVEN_MIN_DAYS`, default 30) — N trades in one
+    lucky week can no longer promote. Anchored to a persisted
+    `validation_started_at` (new `AgentState` column), so both a rolling 30-day
+    window and a fixed window since that date are reported side by side and
+    "proven" status can't silently decay just because trading slowed.
+  - **Per-leg readiness** (`RISK_PROVEN_MIN_TRADES_PER_LEG`, default 30) — each
+    (strategy, regime) combo validated separately; a proven trend_following
+    track record can no longer promote mean_reversion sizing.
+  - **Manual/reconcile/duplicate exit trades excluded** from clean validation
+    metrics, reported separately (gross vs clean vs reconciliation).
+  - **De-noised the recovery-tier trigger**: consecutive-loss threshold raised
+    from a hardcoded 2 to `RISK_RECOVERY_LOSS_STREAK_TRIGGER` (default 3) — 2
+    losses in a row is ~20% likely for a 55%+ win-rate system on pure variance,
+    and the size cut was distorting the very stats being validated.
+  - `/api/validation` and `/api/risk-status` now also expose
+    `bankroll_divergence_pct`, `metrics_fixed_window`, `readiness_fixed_window`,
+    and `validation` (days elapsed/remaining, per-leg readiness summary) —
+    additive fields only, nothing removed.
+  - New `tests/smoke_validation_fixes.py` (34 checks): bankroll normalization,
+    cost-adjusted gate, concentration gate, calendar gate, per-leg isolation,
+    recovery de-noising, reconciliation exclusion, and the headline check —
+    **the actual reported paper stats classify as NOT READY**, failing
+    `sample_size`, `expectancy`, `expectancy_above_cost`, `cost_adjusted_expectancy`,
+    `concentration`, and `calendar_time`.
+
 ## 2026-07-07 (later)
 
 - **Added a configurable strategy-profile system to reduce double-counting.** The

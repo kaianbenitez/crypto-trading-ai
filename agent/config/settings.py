@@ -23,6 +23,7 @@ class Settings:
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     telegram_allowed_user_ids: str = os.getenv("TELEGRAM_ALLOWED_USER_IDS", "")
+    telegram_show_close_lessons: bool = os.getenv("TELEGRAM_SHOW_CLOSE_LESSONS", "false").lower() == "true"
 
     bankroll_usdt: float = float(os.getenv("BANKROLL_USDT", "1000"))
     bankroll_mode: str = os.getenv("BANKROLL_MODE", "static").lower()  # static | equity
@@ -30,6 +31,10 @@ class Settings:
     bankroll_min_usdt: float = float(os.getenv("BANKROLL_MIN_USDT", "50"))
     bankroll_max_usdt: float = float(os.getenv("BANKROLL_MAX_USDT", "0"))  # 0 = no explicit cap
     bankroll_sync_interval_sec: int = int(os.getenv("BANKROLL_SYNC_INTERVAL_SEC", "900"))
+    # Warn (log + surface in metrics) when the configured bankroll and live
+    # exchange equity diverge by more than this %, since every %-based
+    # validation gate is only meaningful if they're consistent.
+    bankroll_divergence_warn_pct: float = float(os.getenv("BANKROLL_DIVERGENCE_WARN_PCT", "20"))
 
     max_risk_per_trade_pct: float = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "1.5"))
     max_daily_drawdown_pct: float = float(os.getenv("MAX_DAILY_DRAWDOWN_PCT", "3"))
@@ -72,10 +77,26 @@ class Settings:
     risk_recovery_drawdown_pct: float = float(os.getenv("RISK_RECOVERY_DRAWDOWN_PCT", "2.0"))
     risk_drawdown_trigger_pct: float = float(os.getenv("RISK_DRAWDOWN_TRIGGER_PCT", "5.0"))
     risk_proven_min_trades: int = int(os.getenv("RISK_PROVEN_MIN_TRADES", "50"))
+    # Raw floor is secondary to the cost-adjusted gate below — kept mainly so a
+    # strategy can't "pass" on cost-adjusted terms while its raw edge is trivial.
     risk_proven_min_expectancy_r: float = float(os.getenv("RISK_PROVEN_MIN_EXPECTANCY_R", "0.15"))
+    # Primary expectancy gate: must clear real trading costs, not just be positive.
+    risk_proven_min_net_r_after_cost: float = float(os.getenv("RISK_PROVEN_MIN_NET_R_AFTER_COST", "0.10"))
     risk_proven_min_profit_factor: float = float(os.getenv("RISK_PROVEN_MIN_PROFIT_FACTOR", "1.3"))
     risk_proven_max_drawdown_pct: float = float(os.getenv("RISK_PROVEN_MAX_DRAWDOWN_PCT", "8.0"))
     risk_proven_min_symbols: int = int(os.getenv("RISK_PROVEN_MIN_SYMBOLS", "3"))
+    # Concentration: promotion must not depend on one lucky coin.
+    risk_proven_max_top_coin_pct: float = float(os.getenv("RISK_PROVEN_MAX_TOP_COIN_PCT", "50"))
+    # Calendar-time floor: N trades in one lucky week can't promote.
+    risk_proven_min_days: int = int(os.getenv("RISK_PROVEN_MIN_DAYS", "30"))
+    # Per-leg (strategy_name + regime) minimum sample before that leg's own
+    # readiness can be considered — deliberately looser than the global floor
+    # since it's evaluated per leg, not overall.
+    risk_proven_min_trades_per_leg: int = int(os.getenv("RISK_PROVEN_MIN_TRADES_PER_LEG", "30"))
+    # Consecutive-loss streak that triggers the "recovery" (reduced-size) tier.
+    # 2 is noise for a real >=50% win-rate system (happens ~1-in-5 stretches);
+    # default raised so recovery reflects a real signal, not variance.
+    risk_recovery_loss_streak_trigger: int = int(os.getenv("RISK_RECOVERY_LOSS_STREAK_TRIGGER", "3"))
 
     reentry_max_trades_per_symbol_per_day: int = int(os.getenv("REENTRY_MAX_TRADES_PER_SYMBOL_PER_DAY", "3"))
     reentry_min_ev_multiplier: float = float(os.getenv("REENTRY_MIN_EV_MULTIPLIER", "1.5"))
@@ -100,6 +121,7 @@ class Settings:
     # shortlisted symbols get the full indicator/MTF/EV stack (stage 2).
     dynamic_market_scan: bool = os.getenv("DYNAMIC_MARKET_SCAN", "true").lower() == "true"
     market_scan_top_n: int = int(os.getenv("MARKET_SCAN_TOP_N", "30"))
+    market_scan_active_symbols: int = int(os.getenv("MARKET_SCAN_ACTIVE_SYMBOLS", os.getenv("MARKET_SCAN_TOP_N", "30")))
     market_scan_min_quote_volume: float = float(os.getenv("MARKET_SCAN_MIN_QUOTE_VOLUME", "50000000"))
     market_scan_max_spread_pct: float = float(os.getenv("MARKET_SCAN_MAX_SPREAD_PCT", "0.15"))
     market_scan_refresh_minutes: int = int(os.getenv("MARKET_SCAN_REFRESH_MINUTES", "60"))

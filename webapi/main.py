@@ -137,6 +137,7 @@ def risk_status(session=Depends(db), _=Depends(require_session)):
         "effective_bankroll_usdt": risk["effective_bankroll_usdt"],
         "configured_bankroll_usdt": risk["configured_bankroll_usdt"],
         "account_equity_usdt": risk["account_equity_usdt"],
+        "bankroll_divergence_pct": risk["bankroll_divergence_pct"],
         "risk_pct": risk["risk_pct"],
         "tier": risk["tier"],
         "mode": risk["mode"],
@@ -149,6 +150,14 @@ def risk_status(session=Depends(db), _=Depends(require_session)):
 @app.get("/api/validation")
 def validation(session=Depends(db), _=Depends(require_session)):
     risk = latest_risk_snapshot(session, settings)
+    leg_readiness_out = {
+        key: {
+            "closed_count": v["closed_count"],
+            "ready": v["ready"],
+            "failed": v["failed"],
+        }
+        for key, v in risk["validation"]["leg_readiness"].items()
+    }
     return {
         "risk": {
             "effective_bankroll_usdt": risk["effective_bankroll_usdt"],
@@ -156,9 +165,21 @@ def validation(session=Depends(db), _=Depends(require_session)):
             "tier": risk["tier"],
             "mode": risk["mode"],
             "reason": risk["reason"],
+            "bankroll_divergence_pct": risk["bankroll_divergence_pct"],
         },
         "metrics": asdict(risk["metrics"]),
         "readiness": risk["readiness"],
+        # Fixed window anchored to validation_started_at (Fix 9) — doesn't
+        # decay just because the rolling 30d window's trade count drops.
+        "metrics_fixed_window": asdict(risk["metrics_fixed_window"]),
+        "readiness_fixed_window": risk["readiness_fixed_window"],
+        "validation": {
+            "validation_started_at": risk["validation"]["validation_started_at"],
+            "days_elapsed": risk["validation"]["days_elapsed"],
+            "days_remaining": risk["validation"]["days_remaining"],
+            "min_days_required": risk["validation"]["min_days_required"],
+            "leg_readiness": leg_readiness_out,
+        },
     }
 
 
