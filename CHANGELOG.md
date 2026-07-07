@@ -5,6 +5,23 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Dashboard, journal, and risk pages now lead with percentages instead of
+  dollar amounts.** Paper-account dollar figures read as "the bot barely
+  makes money" when the underlying performance (in R and %) is fine — the
+  dollar amount is an artifact of a small paper bankroll, not a real edge
+  signal. Open positions, closed-trade rows, and the risk-per-trade footer
+  now show `actual_risk_pct`/`unrealizedPct` instead of computed dollar
+  risk/PnL; the dashboard's "Realized P&L ($)" stat card was removed in
+  favor of the existing bankroll-normalized ROI card; the journal's P&L
+  stat card and per-trade PnL column now show price-based % change instead
+  of `pnl_usdt`; the risk page's per-coin breakdown shows avg R-multiple
+  (bankroll-independent) instead of raw dollar PnL, and its "P&L ($)" stat
+  was dropped in favor of the existing ROI stat. Bankroll figures
+  (account balance, sizing basis) are deliberately kept as dollar amounts
+  since they're account context, not a performance number. Also fixed a
+  latent type gap: `PerformanceMetrics.by_symbol`/`by_strategy` was missing
+  the `count` field the backend always returns.
+
 - **Fixed the dynamic scanner shortlisting testnet-volume artifacts.** On
   Binance testnet, ticker volume is inflated/artificial (confirmed live: SUN
   showed $97M testnet volume vs $3.9M real mainnet volume — a 25x inflation;

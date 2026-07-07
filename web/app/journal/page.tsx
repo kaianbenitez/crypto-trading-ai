@@ -8,7 +8,6 @@ import Sidebar from "../components/Sidebar";
 import { api, Summary, Trade, TradeNarrative } from "@/lib/api";
 import { Badge, StatCard } from "../components/ui";
 
-const money = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const price = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
 function outcomeColor(trade: Trade) {
@@ -16,11 +15,18 @@ function outcomeColor(trade: Trade) {
   return trade.pnl_usdt >= 0 ? "var(--green)" : "var(--red)";
 }
 
+function pctChange(trade: Trade): number | null {
+  if (trade.exit_price == null || !trade.entry_price) return null;
+  const direction = trade.side === "long" ? 1 : -1;
+  return ((trade.exit_price - trade.entry_price) / trade.entry_price) * direction * 100;
+}
+
 function TradeRow({ trade, isOpen, onToggle, rowRef, highlighted }: {
   trade: Trade; isOpen: boolean; onToggle: () => void; rowRef: (el: HTMLDivElement | null) => void; highlighted: boolean;
 }) {
   const color = outcomeColor(trade);
-  const pnl = trade.pnl_usdt == null ? "open" : `${trade.pnl_usdt >= 0 ? "+" : ""}${money.format(trade.pnl_usdt)} USDT`;
+  const pct = pctChange(trade);
+  const pnl = trade.pnl_usdt == null ? "open" : pct !== null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%` : "—";
   const [narrative, setNarrative] = useState<TradeNarrative | null>(null);
   const [narrativeError, setNarrativeError] = useState(false);
 
@@ -71,11 +77,10 @@ function TradeRow({ trade, isOpen, onToggle, rowRef, highlighted }: {
               ["Exit", trade.exit_price == null ? "-" : price.format(trade.exit_price)],
               ["Stop Loss", price.format(trade.stop_loss)],
               ["Take Profit", price.format(trade.take_profit)],
-              ["At risk", `$${money.format(
-                typeof (trade.indicator_snapshot as Record<string, unknown>)?.actual_risk_usdt === "number"
-                  ? (trade.indicator_snapshot as Record<string, number>).actual_risk_usdt
-                  : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty
-              )}`],
+              ["At risk", (() => {
+                const riskPct = (trade.indicator_snapshot as Record<string, unknown>)?.actual_risk_pct;
+                return typeof riskPct === "number" ? `${riskPct.toFixed(2)}%` : "n/a";
+              })()],
             ].map(([label, value]) => (
               <div key={label} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "9px 10px", background: "var(--surface)" }}>
                 <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>{label}</div>
@@ -172,16 +177,17 @@ function JournalContent() {
   const stats = useMemo(() => {
     // Prefer the backend's all-time totals (summary) — trades is capped at
     // the last 100 fetched, so summing it directly would silently disagree
-    // with the true total once there are more than 100 closed trades.
+    // with the true total once there are more than 100 closed trades. ROI%
+    // needs the bankroll, which only summary carries, so there's no
+    // meaningful client-side fallback for it (shown as "—" until it loads).
     if (summary) {
-      return { closed: summary.total_trades, pnl: summary.total_pnl_usdt, winRate: summary.win_rate_pct };
+      return { closed: summary.total_trades, roiPct: summary.roi_pct as number | null, winRate: summary.win_rate_pct };
     }
     const closed = trades.filter(t => t.closed_at);
-    const pnl = closed.reduce((sum, t) => sum + (t.pnl_usdt || 0), 0);
     const wins = closed.filter(t => (t.pnl_usdt || 0) > 0).length;
     return {
       closed: closed.length,
-      pnl,
+      roiPct: null as number | null,
       winRate: closed.length ? (wins / closed.length) * 100 : 0,
     };
   }, [trades, summary]);
@@ -198,7 +204,7 @@ function JournalContent() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(110px, 1fr))", gap: 10 }}>
             <StatCard label="Closed" value={String(stats.closed)} />
             <StatCard label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} />
-            <StatCard label="P&L" value={`${stats.pnl >= 0 ? "+" : ""}${money.format(stats.pnl)}`} color={stats.pnl >= 0 ? "var(--green)" : "var(--red)"} accent={stats.pnl >= 0 ? "var(--green)" : "var(--red)"} />
+            <StatCard label="ROI" value={stats.roiPct !== null ? `${stats.roiPct >= 0 ? "+" : ""}${stats.roiPct.toFixed(2)}%` : "—"} color={stats.roiPct !== null ? (stats.roiPct >= 0 ? "var(--green)" : "var(--red)") : undefined} accent={stats.roiPct !== null ? (stats.roiPct >= 0 ? "var(--green)" : "var(--red)") : undefined} />
           </div>
         </div>
 

@@ -83,10 +83,9 @@ function RiskContent() {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
                   <Stat label="Closed trades" value={String(metrics.closed_count)} />
                   <Stat label="Win rate" value={`${metrics.win_rate_pct.toFixed(1)}%`} />
-                  <Stat label="P&L" value={`${metrics.total_pnl_usdt >= 0 ? "+" : ""}$${money.format(metrics.total_pnl_usdt)}`} color={pnlColor(metrics.total_pnl_usdt)} />
                   <Stat label="ROI" value={pct(metrics.roi_pct)} color={pnlColor(metrics.roi_pct)} />
                   <Stat label="Avg result/trade" value={`${metrics.expectancy_r >= 0 ? "+" : ""}${metrics.expectancy_r.toFixed(2)}R`} color={pnlColor(metrics.expectancy_r)} />
-                  <Stat label="Win $ vs loss $" value={`${metrics.profit_factor.toFixed(2)}x`} />
+                  <Stat label="Payoff ratio" value={`${metrics.profit_factor.toFixed(2)}x`} />
                   <Stat label="Worst drawdown" value={`${metrics.max_drawdown_pct.toFixed(2)}%`} />
                   <Stat label="Coins traded" value={String(metrics.distinct_symbols)} />
                 </div>
@@ -141,10 +140,10 @@ function RiskContent() {
                   {Object.entries(metrics.by_symbol).map(([sym, row]) => (
                     <div key={sym} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
                       <div style={{ fontWeight: 700, fontSize: "var(--text-xs)" }}>{sym.replace("/USDT", "")}</div>
-                      <div style={{ color: pnlColor(row.pnl), fontSize: "var(--text-sm)", fontWeight: 700, marginTop: 2 }}>
-                        {row.pnl >= 0 ? "+" : ""}${money.format(row.pnl)}
+                      <div style={{ color: pnlColor(row.avg_r), fontSize: "var(--text-sm)", fontWeight: 700, marginTop: 2 }}>
+                        {row.avg_r >= 0 ? "+" : ""}{row.avg_r.toFixed(2)}R avg
                       </div>
-                      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>{row.win_rate_pct.toFixed(0)}% WR, {row.avg_r >= 0 ? "+" : ""}{row.avg_r.toFixed(2)}R avg</div>
+                      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>{row.win_rate_pct.toFixed(0)}% WR, {row.count} trade{row.count === 1 ? "" : "s"}</div>
                     </div>
                   ))}
                 </div>

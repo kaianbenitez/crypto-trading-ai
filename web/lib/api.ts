@@ -200,8 +200,8 @@ export interface PerformanceMetrics {
   runner_count: number;
   runner_pnl_usdt: number;
   exit_reason_breakdown: Record<string, number>;
-  by_symbol: Record<string, { pnl: number; avg_r: number; win_rate_pct: number }>;
-  by_strategy: Record<string, { pnl: number; avg_r: number; win_rate_pct: number }>;
+  by_symbol: Record<string, { count: number; pnl: number; avg_r: number; win_rate_pct: number }>;
+  by_strategy: Record<string, { count: number; pnl: number; avg_r: number; win_rate_pct: number }>;
 }
 
 export interface Readiness {
@@ -271,6 +271,89 @@ export interface StrategyProfile {
   observe_only: string[];
 }
 
+export interface StrategyOverview {
+  profile: {
+    name: string;
+    decision_active: string[];
+    observe_only: string[];
+  };
+  execution: {
+    exchange: string;
+    testnet: boolean;
+    timeframe: string;
+    evaluation: string;
+    mtf_timeframes: string[];
+  };
+  scanner: {
+    enabled: boolean;
+    top_n: number;
+    active_symbols: number;
+    refresh_minutes: number;
+    min_quote_volume: number;
+    max_spread_pct: number;
+    max_abs_24h_change_pct: number;
+    use_mainnet_liquidity: boolean;
+    require_market_cap_rank: boolean;
+    min_market_cap_rank: number;
+    include_fixed_majors: boolean;
+    fixed_majors: string[];
+    excluded_symbols: string[];
+  };
+  signals: {
+    regime_rule: string;
+    trend_following: string[];
+    mean_reversion: string[];
+    hard_blocks: string[];
+  };
+  risk: {
+    bankroll_usdt: number;
+    bankroll_mode: string;
+    max_risk_per_trade_pct: number;
+    max_concurrent_positions: number;
+    split_risk_across_slots: boolean;
+    max_portfolio_risk_pct: number;
+    max_same_direction_risk_pct: number;
+    min_entry_risk_pct: number;
+    default_leverage: number;
+    max_leverage: number;
+    confidence_risk_scaling: boolean;
+    confidence_full_risk_at: number;
+    risk_tier_mode: string;
+    risk_base_pct: number;
+    risk_recovery_pct: number;
+    risk_drawdown_pct: number;
+    risk_proven_pct: number;
+    daily_drawdown_pct: number;
+  };
+  costs: {
+    taker_fee_pct: number;
+    slippage_pct: number;
+    min_live_ev_r: number;
+    min_edge_after_cost_r: number;
+    max_estimated_cost_r: number;
+    min_net_ev_after_cost_r: number;
+    min_expected_reward_cost_multiple: number;
+    min_stop_cost_multiple: number;
+  };
+  management: {
+    stop_loss: string;
+    take_profit: string;
+    regular_trailing: string;
+    trailing_take_profit: string;
+    max_hold: string;
+    reentry: {
+      max_trades_per_symbol_per_day: number;
+      min_ev_multiplier: number;
+    };
+  };
+  context: {
+    news_enabled: boolean;
+    news_provider: string;
+    coin_digest_hour_ph: number;
+    telegram_close_lessons: boolean;
+  };
+}
+
 export interface Changelog {
   markdown: string;
 }
@@ -329,6 +412,7 @@ export const api = {
   roster: () => request<RosterInfo>("/api/roster"),
   newsStatus: () => request<NewsStatus>("/api/news-status"),
   strategyProfile: () => request<StrategyProfile>("/api/strategy-profile"),
+  strategy: () => request<StrategyOverview>("/api/strategy"),
   changelog: () => request<Changelog>("/api/changelog"),
   activityLog: (limit = 200, since?: string) =>
     request<ActivityLogEntry[]>(`/api/activity-log?limit=${limit}${since ? `&since=${encodeURIComponent(since)}` : ""}`),

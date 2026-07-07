@@ -40,8 +40,13 @@ const TRADE_REGIME_LABEL: Record<string, string> = {
 function friendlyStrategy(s?: string) { return s ? (STRATEGY_LABEL[s] ?? s.replace(/_/g, " ")) : "—"; }
 function friendlyTradeRegime(r?: string) { return r ? (TRADE_REGIME_LABEL[r] ?? r.replace(/_/g, " ")) : "—"; }
 
+function parseApiDate(value: string) {
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  return new Date(normalized.endsWith("Z") || normalized.includes("+") ? normalized : normalized + "Z");
+}
+
 function openDuration(openedAt: string) {
-  const opened = new Date(openedAt).getTime();
+  const opened = parseApiDate(openedAt).getTime();
   if (!Number.isFinite(opened)) return "Open";
   const totalMinutes = Math.max(0, Math.floor((Date.now() - opened) / 60000));
   const days = Math.floor(totalMinutes / 1440);
@@ -99,12 +104,6 @@ function latestClose(payload?: CandlePayload) {
   return last?.close;
 }
 
-function unrealizedPnl(trade: Pick<Trade, "side" | "entry_price" | "qty">, currentPrice?: number) {
-  if (currentPrice === undefined) return undefined;
-  const direction = trade.side === "long" ? 1 : -1;
-  return (currentPrice - trade.entry_price) * direction * trade.qty;
-}
-
 function unrealizedPct(trade: Pick<Trade, "side" | "entry_price">, currentPrice?: number) {
   if (currentPrice === undefined || !trade.entry_price) return undefined;
   const direction = trade.side === "long" ? 1 : -1;
@@ -118,15 +117,12 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
   // for trading fees and break-even price, unlike the (close - entry) * qty
   // approximation from 1h candles, which was drifting a few dollars off.
   const currentPrice = live?.mark_price ?? latestClose(payload);
-  const openPnl = live?.unrealized_pnl ?? unrealizedPnl(trade, currentPrice);
   const openPct = live?.roi_pct ?? unrealizedPct(trade, currentPrice);
   // Show every reason the agent gathered, not just the first — a single
   // line was always the same generic regime restatement on every trade.
   const note = detail.reasoning.thesis.join(" ");
   const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
-  const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
-    ? snapshot.actual_risk_usdt
-    : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
+  const riskPct = typeof snapshot?.actual_risk_pct === "number" ? snapshot.actual_risk_pct : undefined;
 
   return (
     <div className="ui-card" style={{ borderColor: `color-mix(in oklab, ${sideColor} 22%, var(--border))` }}>
@@ -156,14 +152,12 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
           <div>
             <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>Unrealized P&L</div>
-            <div style={{ color: openPnl === undefined ? "var(--muted)" : pnlColor(openPnl), fontSize: "var(--text-2xl)", fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-              {openPnl === undefined ? "Loading" : `${openPnl >= 0 ? "+" : ""}$${money.format(openPnl)}`}
+            <div style={{ color: openPct === undefined ? "var(--muted)" : pnlColor(openPct), fontSize: "var(--text-2xl)", fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+              {openPct === undefined ? "Loading" : `${openPct >= 0 ? "+" : ""}${openPct.toFixed(2)}%`}
             </div>
-            {openPct !== undefined && (
-              <div style={{ color: pnlColor(openPct), fontSize: "var(--text-xs)", marginTop: 5 }}>
-                {openPct >= 0 ? "+" : ""}{openPct.toFixed(2)}% since entry
-              </div>
-            )}
+            <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", marginTop: 5 }}>
+              since entry
+            </div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>Price now</div>
@@ -187,7 +181,7 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
         </div>
 
         <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: note ? 10 : 0 }}>
-          ${money.format(riskedAmt)} at risk · qty {price4.format(trade.qty)}
+          {riskPct !== undefined ? `${riskPct.toFixed(2)}% risked` : "risk n/a"} · qty {price4.format(trade.qty)}
         </div>
 
         {note && (
@@ -228,9 +222,7 @@ function DetailedOpenPosition({ detail, payload, live }: { detail: OpenPositionD
 function OpenPosition({ trade }: { trade: Trade }) {
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
-  const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
-    ? snapshot.actual_risk_usdt
-    : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
+  const riskPct = typeof snapshot?.actual_risk_pct === "number" ? snapshot.actual_risk_pct : undefined;
   return (
     <div className="ui-card" style={{ padding: "16px 20px", borderColor: `color-mix(in oklab, ${sideColor} 20%, var(--border))` }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
@@ -273,7 +265,7 @@ function OpenPosition({ trade }: { trade: Trade }) {
       </div>
 
       <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginTop: 8 }}>
-        ${money.format(riskedAmt)} at risk
+        {riskPct !== undefined ? `${riskPct.toFixed(2)}% risked` : "risk n/a"}
       </div>
 
       {trade.entry_reasoning.length > 0 && (
@@ -317,9 +309,7 @@ function TradeRow({ trade }: { trade: Trade }) {
   const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
   const pnlPct = trade.exit_price !== null ? unrealizedPct(trade, trade.exit_price) : undefined;
   const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
-  const riskedAmt = typeof snapshot?.actual_risk_usdt === "number"
-    ? snapshot.actual_risk_usdt
-    : Math.abs(trade.entry_price - trade.stop_loss) * trade.qty;
+  const riskPct = typeof snapshot?.actual_risk_pct === "number" ? snapshot.actual_risk_pct : undefined;
   const footerNote = noteworthyExitReason(trade.exit_reason) ?? specificReasoning(trade.entry_reasoning);
   return (
     <Link
@@ -335,20 +325,15 @@ function TradeRow({ trade }: { trade: Trade }) {
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
           <span style={{ color: pnlColor(pnl), fontWeight: 700, fontSize: "var(--text-md)", fontVariantNumeric: "tabular-nums" }}>
-            {pnl >= 0 ? "+" : ""}{money.format(pnl)} <span style={{ fontSize: "var(--text-2xs)", fontWeight: 400, color: "var(--muted)" }}>USDT</span>
+            {pnlPct !== undefined ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "—"}
           </span>
-          {pnlPct !== undefined && (
-            <span style={{ color: pnlColor(pnlPct), fontSize: "var(--text-2xs)", fontWeight: 600 }}>
-              ({pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%)
-            </span>
-          )}
         </div>
         <span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
-          {trade.closed_at ? new Date(trade.closed_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "—"}
+          {trade.closed_at ? parseApiDate(trade.closed_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "—"}
         </span>
       </div>
       <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
-        ${money.format(riskedAmt)} at risk
+        {riskPct !== undefined ? `${riskPct.toFixed(2)}% risked` : "risk n/a"}
       </div>
       <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {footerNote}
@@ -471,7 +456,7 @@ function Dashboard() {
 
   const lastChecked = useMemo(() => {
     if (!status?.checked_at) return "—";
-    const d = new Date(status.checked_at);
+    const d = parseApiDate(status.checked_at);
     return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " +
            d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }, [status?.checked_at]);
@@ -482,11 +467,6 @@ function Dashboard() {
   const killActive   = summary?.kill_switch_active;
   const regime       = status?.macro_regime || "normal";
   const regimeMeta   = REGIME_META[regime] || { label: regime, color: "var(--muted)" };
-  // summary.total_pnl_usdt is authoritative (computed over ALL closed trades
-  // server-side). closedTrades is only the last-15-trades fetch used for the
-  // recent-activity list, so summing it here would silently disagree with
-  // the true all-time total whenever there are more than ~15 closed trades.
-  const totalPnl     = summary?.total_pnl_usdt ?? closedTrades.reduce((sum, t) => sum + (t.pnl_usdt ?? 0), 0);
 
   return (
     <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex" }}>
@@ -543,8 +523,7 @@ function Dashboard() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 18 }}>
           {[
             <StatCard key="bankroll" label="Bankroll" value={summary ? `$${money.format(summary.bankroll_usdt)}` : "—"} sub="USDT balance" loading={loading} accent="var(--accent)" />,
-            <StatCard key="roi" label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub="all-time" loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />,
-            <StatCard key="pnl" label="Realized P&L" value={summary ? `${totalPnl >= 0 ? "+" : ""}$${money.format(totalPnl)}` : "—"} color={pnlColor(totalPnl)} sub={summary ? `${summary.total_trades} closed trades` : undefined} loading={loading} accent={pnlColor(totalPnl)} />,
+            <StatCard key="roi" label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub={summary ? `${summary.total_trades} closed trades, all-time` : "all-time"} loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />,
             <StatCard key="winrate" label="Win Rate" value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"} sub={summary ? `${summary.total_trades} total` : undefined} loading={loading} accent={summary ? (summary.win_rate_pct >= 50 ? "var(--green)" : "var(--amber)") : undefined} />,
             <StatCard key="open" label="Open" value={summary ? String(summary.open_positions) : "—"} color={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} sub="positions" loading={loading} accent={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} />,
             <StatCard key="macro" label="Macro" value={regimeMeta.label} color={regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regimeMeta.color} />,
