@@ -218,6 +218,19 @@ def news_status(_=Depends(require_session)):
 _CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 
 
+@app.get("/api/strategy-profile")
+def strategy_profile(_=Depends(require_session)):
+    """Active strategy profile and which modules may affect a trade decision
+    vs. observe-only. Config state, not a live probe."""
+    from agent.strategy.profiles import get_profile
+    p = get_profile(settings.strategy_profile)
+    return {
+        "profile": p.name,
+        "decision_active": p.decision_active_modules,
+        "observe_only": p.observe_only_modules,
+    }
+
+
 @app.get("/api/changelog")
 def changelog(_=Depends(require_session)):
     """Raw contents of the repo's CHANGELOG.md for the dashboard's Changelog page."""

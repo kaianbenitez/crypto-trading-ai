@@ -4,9 +4,10 @@ from agent.strategy.regime import detect_regime, Regime
 from agent.strategy.trend import trend_signal
 from agent.strategy.mean_reversion import mean_reversion_signal
 from agent.strategy.signal import Signal, Side
+from agent.strategy.profiles import StrategyProfile, get_profile, gated_delta
 
 
-def generate_signal(row: pd.Series, prev: pd.Series, params: dict) -> Signal:
+def generate_signal(row: pd.Series, prev: pd.Series, params: dict, profile: StrategyProfile | None = None) -> Signal:
     """Regime-gated ensemble — all filters are soft except ATR shock.
 
     Layer order:
@@ -14,7 +15,15 @@ def generate_signal(row: pd.Series, prev: pd.Series, params: dict) -> Signal:
       2. Regime detection (trend vs mean-reversion) → TA signal
       3. Market context (structure bias + premium/discount → confidence penalties)
       4. SMC confidence boost (OB, FVG, liquidity sweep alignment)
+
+    `profile` gates whether the SMC boost (step 4) may change confidence. When
+    omitted, the profile is read from params["strategy_profile"] (default
+    baseline_simple), so callers that don't opt in get the clean baseline. SMC
+    is always *computed and recorded* for observability, but only *applied*
+    when the profile allows it — see agent/strategy/profiles.py.
     """
+    if profile is None:
+        profile = get_profile(params.get("strategy_profile"))
 
     # ------------------------------------------------------------------
     # 1. ATR shock filter — skip new entries during volatility spikes
@@ -44,6 +53,14 @@ def generate_signal(row: pd.Series, prev: pd.Series, params: dict) -> Signal:
     if not signal.is_actionable:
         return signal
 
+    # Base confidence = the entry setup itself, before any soft adjustment.
+    # This anchors the confidence model: the setup earns the confidence, the
+    # rest may only filter/modestly confirm.
+    breakdown = {
+        "profile": profile.name,
+        "base_confidence": round(signal.confidence, 4),
+    }
+
     # ------------------------------------------------------------------
     # 3. Market context — soft penalties (never hard-block)
     # ------------------------------------------------------------------
@@ -71,10 +88,16 @@ def generate_signal(row: pd.Series, prev: pd.Series, params: dict) -> Signal:
             ctx_penalty += 0.10
             signal.reasoning.append(f"Price in DISCOUNT zone ({range_pos:.2f}) — unfavourable for shorts")
 
+    # Market-context penalty stays decision-active in every profile: it only
+    # ever *reduces* confidence (implements the "avoid late/premium entries"
+    # rule), so it can't contribute to upward double-counting.
     signal.confidence = max(0.0, signal.confidence - ctx_penalty)
+    breakdown["context_penalty"] = round(-ctx_penalty, 4)
 
     # ------------------------------------------------------------------
-    # 4. SMC confidence boost (soft filter — aligns, does not hard-block)
+    # 4. SMC confidence boost — OBSERVE-ONLY unless profile.smc_active.
+    #    Always computed & recorded; only applied to confidence when the
+    #    active profile allows SMC to affect the decision.
     # ------------------------------------------------------------------
     smc_boost   = 0.0
     smc_reasons = []
@@ -101,13 +124,25 @@ def generate_signal(row: pd.Series, prev: pd.Series, params: dict) -> Signal:
             smc_boost += 0.15
             smc_reasons.append("Bearish liquidity sweep — buy-side grabbed, reversal likely")
 
-    signal.confidence = min(signal.confidence + smc_boost, 1.0)
-    signal.reasoning.extend(smc_reasons)
+    # Apply only if the profile lets SMC affect decisions; record either way.
+    gated_delta(signal, smc_boost, profile.smc_active, "smc", breakdown)
+    if profile.smc_active:
+        signal.reasoning.extend(smc_reasons)
+    elif smc_boost > 0:
+        tag = "[SMC observed] " if profile.smc_verbose else "[observed, not applied] "
+        signal.reasoning.append(
+            f"{tag}SMC boost {smc_boost:+.2f} withheld under profile '{profile.name}': "
+            + "; ".join(smc_reasons)
+        )
+
+    breakdown["final_confidence"] = round(signal.confidence, 4)
     signal.indicator_snapshot.update({
         "atr_ratio":       atr_ratio,
         "structure_bias":  structure_bias,
         "range_position":  range_pos,
-        "smc_boost":       smc_boost,
+        "smc_boost":       smc_boost,          # raw observed boost (kept for back-compat)
+        "strategy_profile": profile.name,
+        "confidence_breakdown": breakdown,
     })
 
     return signal

@@ -56,6 +56,14 @@ class Settings:
     min_live_ev_r: float = float(os.getenv("MIN_LIVE_EV_R", "0.25"))
     min_edge_after_cost_r: float = float(os.getenv("MIN_EDGE_AFTER_COST_R", "0.15"))
 
+    # Strategy profile: which modules may affect a trade decision.
+    #   baseline_simple (default) — base signal + MTF + cost/risk gates only;
+    #     SMC/news/memory/adaptive observe & log but cannot change the decision.
+    #   full_agentic — the full stack (current behavior).
+    #   smc_observe / memory_observe — baseline with extra ablation logging.
+    # See agent/strategy/profiles.py.
+    strategy_profile: str = os.getenv("STRATEGY_PROFILE", "baseline_simple")
+
     risk_tier_mode: str = os.getenv("RISK_TIER_MODE", "auto").lower()  # auto | fixed
     risk_base_pct: float = float(os.getenv("RISK_BASE_PCT", "1.0"))
     risk_recovery_pct: float = float(os.getenv("RISK_RECOVERY_PCT", "0.75"))

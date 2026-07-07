@@ -33,6 +33,7 @@ from agent.exchange.bybit_futures import BybitFuturesAdapter
 from agent.fundamental.market_context import add_market_context
 from agent.risk.engine import RiskEngine
 from agent.strategy.ensemble import generate_signal
+from agent.strategy.profiles import get_profile, gated_delta, alignment_report
 from agent.strategy.indicators import add_indicators
 from agent.strategy.mtf_scorer import compute_confluence, resample_ohlcv, get_ev_calibration
 from agent.strategy.signal import Side
@@ -63,6 +64,12 @@ USE_SMC    = True
 USE_MTF    = True
 BE_TRIGGER_R    = 1.0
 MAX_TRADE_HOURS = 48
+
+# Which modules may affect a trade decision this run. Default baseline_simple:
+# base signal + MTF + cost/risk gates decide; SMC/news/memory/adaptive observe
+# and log but cannot change confidence/EV/sizing or block/approve. Switch via
+# STRATEGY_PROFILE=full_agentic to restore the full stack.
+ACTIVE_PROFILE = get_profile(settings.strategy_profile)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1176,17 +1183,23 @@ def run():
                     state.last_candle = now_candle
                     continue
 
-                # --- Generate signal ---
-                signal = generate_signal(row, prev, state.params)
+                # --- Generate signal (profile gates SMC inside) ---
+                signal = generate_signal(row, prev, state.params, profile=ACTIVE_PROFILE)
 
+                # --- Coin-brain auto-disable — decision-active only when the
+                #     profile allows adaptive modules; otherwise observe-only. ---
                 try:
                     disabled_legs = PerCoinBrain(session, symbol).disabled_legs()
                     if signal.strategy_name in disabled_legs:
-                        log.info(f"[{symbol}] {signal.strategy_name} disabled by per-coin brain")
-                        record(symbol, f"{signal.strategy_name} disabled by per-coin brain",
-                               gate="leg_disabled", side=signal.side.value, confidence=signal.confidence)
-                        state.last_candle = now_candle
-                        continue
+                        if ACTIVE_PROFILE.adaptive_active:
+                            log.info(f"[{symbol}] {signal.strategy_name} disabled by per-coin brain")
+                            record(symbol, f"{signal.strategy_name} disabled by per-coin brain",
+                                   gate="leg_disabled", side=signal.side.value, confidence=signal.confidence)
+                            state.last_candle = now_candle
+                            continue
+                        else:
+                            log.info(f"[{symbol}] [observed] coin-brain would disable {signal.strategy_name} "
+                                     f"(not applied under profile {ACTIVE_PROFILE.name})")
                 except Exception as e:
                     log.warning(f"[{symbol}] Per-coin leg check failed (continuing): {e}")
 
@@ -1228,15 +1241,32 @@ def run():
                         except Exception as e:
                             log.warning(f"[{symbol}] MTF scorer failed (continuing): {e}")
 
-                    # --- Memory check ---
+                    # Running confidence audit trail (seeded by the ensemble).
+                    breakdown = signal.indicator_snapshot.setdefault("confidence_breakdown", {"profile": ACTIVE_PROFILE.name})
+
+                    # --- Double-counting diagnostic (observe-only, never gates) ---
+                    try:
+                        align = alignment_report(row, signal.side.value, signal.indicator_snapshot.get("mtf_bias"))
+                        signal.indicator_snapshot["alignment"] = align
+                        if align["redundancy_flag"]:
+                            log.info(
+                                f"[{symbol}] ⚠ redundancy: {align['aligned_count']}/5 signals aligned but "
+                                f"~{align['independent_signals_est']} independent — 'confluence' may be the trend counted twice"
+                            )
+                    except Exception as e:
+                        log.warning(f"[{symbol}] alignment diagnostic failed (continuing): {e}")
+
+                    # --- Memory check — observe-only unless profile.memory_active ---
                     try:
                         mem_delta, mem_notes = apply_memory(symbol, signal, row, session)
+                        gated_delta(signal, mem_delta, ACTIVE_PROFILE.memory_active, "memory", breakdown)
                         if mem_delta != 0:
-                            signal.confidence = max(0.0, min(1.0, signal.confidence + mem_delta))
-                            for note in mem_notes:
-                                signal.reasoning.append(note)
-                                log.info(f"[{symbol}] {note}")
                             signal.indicator_snapshot["memory_delta"] = round(mem_delta, 2)
+                            tag = "" if ACTIVE_PROFILE.memory_active else "[observed] "
+                            for note in mem_notes:
+                                signal.reasoning.append(f"{tag}{note}")
+                                if ACTIVE_PROFILE.memory_active or ACTIVE_PROFILE.memory_verbose:
+                                    log.info(f"[{symbol}] {tag}{note}")
                     except Exception as e:
                         log.warning(f"[{symbol}] Memory check failed (continuing): {e}")
 
@@ -1246,27 +1276,38 @@ def run():
                         state.last_candle = now_candle
                         continue
 
-                    # --- Adaptive indicator weights ---
+                    # --- Adaptive indicator weights — observe-only unless adaptive_active ---
                     try:
                         weight_delta = apply_weights(signal, row, symbol, session)
+                        gated_delta(signal, weight_delta, ACTIVE_PROFILE.adaptive_active, "adaptive_weights", breakdown)
                         if weight_delta != 0:
-                            signal.confidence = max(0.0, min(1.0, signal.confidence + weight_delta))
                             signal.indicator_snapshot["weight_delta"] = round(weight_delta, 2)
-                            log.info(f"[{symbol}] Weight delta: {weight_delta:+.2f} → confidence={signal.confidence:.2f}")
+                            if ACTIVE_PROFILE.adaptive_active or ACTIVE_PROFILE.memory_verbose:
+                                tag = "" if ACTIVE_PROFILE.adaptive_active else "[observed] "
+                                log.info(f"[{symbol}] {tag}Weight delta: {weight_delta:+.2f} → confidence={signal.confidence:.2f}")
                     except Exception as e:
                         log.warning(f"[{symbol}] Weight apply failed (continuing): {e}")
 
-                    # --- News sentiment (FA) — soft nudge from the daily coin digest ---
+                    # --- News sentiment (FA) — observe-only unless news_active ---
                     try:
                         fa_delta = apply_sentiment_adjustment(symbol, signal, session)
+                        gated_delta(signal, fa_delta, ACTIVE_PROFILE.news_active, "news", breakdown)
                         if fa_delta != 0:
-                            signal.confidence = max(0.0, min(1.0, signal.confidence + fa_delta))
                             signal.indicator_snapshot["fa_delta"] = round(fa_delta, 2)
                     except Exception as e:
                         log.warning(f"[{symbol}] Sentiment apply failed (continuing): {e}")
 
-                    # --- Per-coin + macro size adjustment ---
-                    trade_params = PerCoinBrain(session, symbol).apply_to_trade_params(state.params)
+                    # Finalize the confidence audit trail.
+                    breakdown["final_confidence"] = round(signal.confidence, 4)
+                    breakdown["decision_active"] = ACTIVE_PROFILE.decision_active_modules
+                    breakdown["observe_only"] = ACTIVE_PROFILE.observe_only_modules
+
+                    # --- Per-coin + macro size adjustment — coin-brain param
+                    #     tuning is adaptive, so gate it by profile too. ---
+                    if ACTIVE_PROFILE.adaptive_active:
+                        trade_params = PerCoinBrain(session, symbol).apply_to_trade_params(state.params)
+                    else:
+                        trade_params = dict(state.params)
                     if macro.size_multiplier < 1.0:
                         orig_risk = trade_params.get("max_risk_per_trade_pct", 1.5)
                         trade_params["max_risk_per_trade_pct"] = round(orig_risk * macro.size_multiplier, 3)

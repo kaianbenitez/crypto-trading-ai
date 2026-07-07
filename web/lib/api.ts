@@ -265,6 +265,12 @@ export interface NewsStatus {
   api_url: string;
 }
 
+export interface StrategyProfile {
+  profile: string;
+  decision_active: string[];
+  observe_only: string[];
+}
+
 export interface Changelog {
   markdown: string;
 }
@@ -322,6 +328,7 @@ export const api = {
   adaptiveActivity: (limit = 50) => request<AdaptiveActivityEntry[]>(`/api/adaptive-activity?limit=${limit}`),
   roster: () => request<RosterInfo>("/api/roster"),
   newsStatus: () => request<NewsStatus>("/api/news-status"),
+  strategyProfile: () => request<StrategyProfile>("/api/strategy-profile"),
   changelog: () => request<Changelog>("/api/changelog"),
   activityLog: (limit = 200, since?: string) =>
     request<ActivityLogEntry[]>(`/api/activity-log?limit=${limit}${since ? `&since=${encodeURIComponent(since)}` : ""}`),

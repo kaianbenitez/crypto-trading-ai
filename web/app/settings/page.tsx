@@ -5,8 +5,8 @@ import { Circle, Newspaper } from "@phosphor-icons/react";
 import AuthGate from "../components/AuthGate";
 import Sidebar from "../components/Sidebar";
 import CoinLogo from "../components/CoinLogo";
-import { api, NewsStatus, RosterInfo, Summary } from "@/lib/api";
-import { Card, Button } from "../components/ui";
+import { api, NewsStatus, RosterInfo, StrategyProfile, Summary } from "@/lib/api";
+import { Card, Button, Badge } from "../components/ui";
 
 function StatusDot({ color }: { color: string }) {
   return <Circle size={8} weight="fill" color={color} />;
@@ -16,13 +16,14 @@ function SettingsContent() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [roster, setRoster] = useState<RosterInfo | null>(null);
   const [news, setNews] = useState<NewsStatus | null>(null);
+  const [profile, setProfile] = useState<StrategyProfile | null>(null);
   const [toggling, setToggling] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function load() {
-    Promise.all([api.summary(), api.roster(), api.newsStatus()])
-      .then(([s, r, n]) => { setSummary(s); setRoster(r); setNews(n); })
+    Promise.all([api.summary(), api.roster(), api.newsStatus(), api.strategyProfile()])
+      .then(([s, r, n, p]) => { setSummary(s); setRoster(r); setNews(n); setProfile(p); })
       .catch(() => setError("Could not load settings"));
   }
 
@@ -85,6 +86,41 @@ function SettingsContent() {
                 </Button>
               )}
             </div>
+          </Card>
+
+          <Card title="Strategy profile">
+            {profile ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "var(--text-md)", fontWeight: 700 }}>{profile.profile}</span>
+                  {profile.profile === "baseline_simple" && <Badge color="var(--accent)">clean baseline</Badge>}
+                  {profile.profile === "full_agentic" && <Badge color="var(--amber)">full stack</Badge>}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+                  <div>
+                    <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Decides trades</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {profile.decision_active.map(m => (
+                        <span key={m} className="ui-badge" style={{ color: "var(--green)", background: "color-mix(in oklab, var(--green) 14%, transparent)", borderColor: "color-mix(in oklab, var(--green) 30%, transparent)" }}>{m}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Observes only</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {profile.observe_only.length > 0 ? profile.observe_only.map(m => (
+                        <span key={m} className="ui-badge" style={{ color: "var(--muted)", background: "var(--surface2)", borderColor: "var(--border)" }}>{m}</span>
+                      )) : <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>none — every module is decision-active</span>}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginTop: 12 }}>
+                  Observe-only modules still log their read for later comparison, but cannot change confidence, EV, sizing, or block/approve a trade. Change via the STRATEGY_PROFILE env var, then restart the agent.
+                </div>
+              </>
+            ) : (
+              <div style={{ color: "var(--muted)", fontSize: "var(--text-sm)" }}>Loading…</div>
+            )}
           </Card>
 
           <Card title="Market scanner">

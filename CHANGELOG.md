@@ -3,6 +3,37 @@
 All notable changes to this project are logged here, most recent first.
 Format is informal — one entry per meaningful change, not strict Keep a Changelog.
 
+## 2026-07-07 (later)
+
+- **Added a configurable strategy-profile system to reduce double-counting.** The
+  full stack layered SMC, news, memory, and adaptive-weight confidence boosts on
+  top of a base signal already trend-confirmed by EMA+MACD+ADX and again by MTF —
+  so in a trending market the same condition got counted several times, inflating
+  confidence and encouraging late entries. Profiles gate which modules may affect
+  a decision, without deleting any code:
+  - `baseline_simple` (**new default**): base signal + MTF filter + cost/risk
+    gates decide. SMC / news / memory / adaptive-weights / coin-brain still run
+    and log their read but **cannot** change confidence, EV, sizing, or block/
+    approve a trade.
+  - `full_agentic`: previous behavior (everything decision-active).
+  - `smc_observe` / `memory_observe`: baseline with extra ablation logging.
+  - New `STRATEGY_PROFILE` env var; set to `full_agentic` to restore the old
+    behavior (backtests read it from params too, so simple vs full can be
+    compared later).
+  - Every evaluated setup now records a `confidence_breakdown` (base confidence,
+    each module's *observed* vs *applied* contribution, final confidence, and the
+    decision-active/observe-only module lists) plus a double-counting diagnostic
+    that flags when 4+ signals agree but collapse to ≤2 independent reads.
+  - Market-context penalty (premium/discount timing) stays decision-active in
+    every profile — it only ever *reduces* confidence, so it implements the
+    "avoid late/premium entries" rule without contributing to upward stacking.
+  - New `/api/strategy-profile` endpoint + a Settings-page card showing the
+    active profile and its decides-trades vs observes-only modules.
+  - New smoke test `tests/smoke_strategy_profile.py` (27 checks) proving SMC/
+    news/memory are observed-but-not-applied under baseline, re-applied under
+    full, that news can't manufacture a trade, and that the redundancy flag fires
+    correctly.
+
 ## 2026-07-07
 
 - **Redesigned the dashboard's visual language** — a genuine visual overhaul, not
