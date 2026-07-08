@@ -103,16 +103,21 @@ class Settings:
 
     # Deprecated: CryptoPanic's free tier was discontinued/paywalled. Left
     # here only so an old .env with this var set doesn't break; unused by
-    # agent.fundamental.news_sentiment, which now uses cryptocurrency.cv.
+    # agent.fundamental.news_sentiment, which now uses marketaux.com.
     cryptopanic_api_key: str = os.getenv("CRYPTOPANIC_API_KEY", "")
     coin_digest_hour_ph: int = int(os.getenv("COIN_DIGEST_HOUR_PH", "21"))  # 9 PM PHT ≈ start of a 9-5 Eastern workday
 
-    # Free, no-auth news context (cryptocurrency.cv) — display/sentiment-nudge
-    # only, never a trading signal on its own. Degrades to "no data" on any
-    # failure; trading is never blocked by this.
+    # News context (marketaux.com) — display/sentiment-nudge only, never a
+    # trading signal on its own. Degrades to "no data" on any failure;
+    # trading is never blocked by this. Free tier is 100 requests/day —
+    # keep total daily call volume (digest + any future per-position polling)
+    # well under that.
+    # cryptocurrency.cv (the prior provider) went dark (HTTP 402
+    # "DEPLOYMENT_DISABLED") — migrated 2026-07.
     news_enabled: bool = os.getenv("NEWS_ENABLED", "true").lower() == "true"
-    news_provider: str = os.getenv("NEWS_PROVIDER", "cryptocurrency_cv")
-    news_api_url: str = os.getenv("NEWS_API_URL", "https://cryptocurrency.cv/api/news")
+    news_provider: str = os.getenv("NEWS_PROVIDER", "marketaux")
+    news_api_url: str = os.getenv("NEWS_API_URL", "https://api.marketaux.com/v1/news/all")
+    marketaux_api_key: str = os.getenv("MARKETAUX_API_KEY", "")
     news_timeout_sec: int = int(os.getenv("NEWS_TIMEOUT_SEC", "8"))
     news_max_headlines: int = int(os.getenv("NEWS_MAX_HEADLINES", "5"))
 

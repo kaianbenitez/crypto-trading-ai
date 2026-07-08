@@ -5,6 +5,30 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Fixed dead news provider — migrated to marketaux.com.** `cryptocurrency.cv`
+  (the free, no-key provider `agent/fundamental/news_sentiment.py` used for
+  the daily coin digest) confirmed dead — every endpoint now returns HTTP 402
+  `DEPLOYMENT_DISABLED` (a Vercel platform message, not a paywall pivot).
+  Switched to marketaux.com's free tier (100 requests/day, no card required):
+  - Crypto entities are queried with a `CC:{SYMBOL}` prefix against
+    marketaux's own entity graph — every coin gets a real, correctly-matched
+    query now, not just BTC/ETH/SOL with a noisy keyword-filtered fallback
+    for everything else (the old provider's limitation).
+  - Sentiment now comes from marketaux's real per-article score (matched to
+    the specific coin's entity within each article), replacing the old
+    hand-rolled positive/negative keyword-count lexicon.
+  - Verified live against the real API: XLM/Stellar and ADA/Cardano return
+    correctly-matched, same-day articles; smaller-cap coins (e.g. PENDLE,
+    MORPHO) genuinely have no matching entity on marketaux and correctly
+    degrade to "no data" rather than fabricating a result — same
+    never-raises, trading-is-never-blocked contract as before.
+  - New `MARKETAUX_API_KEY` env var required — **must be added to the VPS
+    `.env`** before this takes effect there (`news_enabled` stays on, but
+    `fetch_articles` returns `[]` with a warning log if the key is unset).
+  - At ~30 active roster coins once/day for the digest, this uses roughly
+    30 of the 100/day free-tier budget, leaving headroom for future
+    per-open-position polling.
+
 - **Reduced dashboard eye strain and fixed a contrast/false-signal issue.**
   Theme tokens (`--bg`/`--surface`/`--surface2`/`--surface3`/`--border`/
   `--border2`) moved off near-black to cut text halation; `--muted` lifted
