@@ -709,15 +709,19 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
 
 
 def _check_structure_alert(adapter, session, state, trade: Trade) -> None:
-    """Fetches 1h candles for this open position, persists the current
-    structure read (bias + last break) into the trade's indicator_snapshot
-    for the dashboard to display, and checks for a fresh CHoCH against the
-    trade's own direction — the one structure event worth a Telegram ping (a
-    BOS, i.e. structure still agreeing with the trade, never alerts). Own
-    cadence (SMC_STRUCTURE_CHECK_MINUTES), independent of the 60s main loop —
-    1h swing structure doesn't change fast enough to be worth checking every
-    cycle. Never raises; a failure here must not affect trailing-stop/exit
-    logic running in the same cycle."""
+    """Fetches 1h candles for this open position and persists a live status
+    read into the trade's indicator_snapshot for the dashboard to display:
+    trend direction + momentum (always available, computed from the same
+    candles every check) and swing structure bias/last break (only available
+    once a confirmed BOS/CHoCH has occurred — can be None for a while on a
+    trending-without-a-pullback-yet symbol, that's expected, not a bug).
+    Also checks for a fresh CHoCH against the trade's own direction — the one
+    structure event worth a Telegram ping (a BOS, i.e. structure still
+    agreeing with the trade, never alerts). Own cadence
+    (SMC_STRUCTURE_CHECK_MINUTES), independent of the 60s main loop — none of
+    this changes fast enough to be worth checking every cycle. Never raises;
+    a failure here must not affect trailing-stop/exit logic running in the
+    same cycle."""
     if not settings.smc_structure_enabled:
         return
     now = datetime.now(timezone.utc)
@@ -731,14 +735,41 @@ def _check_structure_alert(adapter, session, state, trade: Trade) -> None:
     try:
         candles = adapter.fetch_ohlcv(state.symbol, "1h", limit=max(settings.smc_structure_pivot_size * 2, 100))
         df = pd.DataFrame([{
-            "high": c.high, "low": c.low, "close": c.close, "timestamp": c.timestamp,
+            "open": c.open, "high": c.high, "low": c.low, "close": c.close,
+            "volume": c.volume, "timestamp": c.timestamp,
         } for c in candles]).sort_values("timestamp").reset_index(drop=True)
     except Exception as e:
         log.warning(f"[{state.symbol}] Structure check candle fetch failed: {e}")
         return
 
     result = compute_structure(df, size=settings.smc_structure_pivot_size)
+
+    trend_direction = None
+    momentum_state = None
+    try:
+        ind = add_indicators(df, BASE_PARAMS).dropna()
+        if len(ind) >= 4:
+            last = ind.iloc[-1]
+            if last["ema_fast"] > last["ema_slow"] * 1.001:
+                trend_direction = "bullish"
+            elif last["ema_fast"] < last["ema_slow"] * 0.999:
+                trend_direction = "bearish"
+            else:
+                trend_direction = "sideways"
+
+            rsi_now, rsi_prev = last["rsi"], ind.iloc[-4]["rsi"]
+            if rsi_now - rsi_prev > 2:
+                momentum_state = "strengthening"
+            elif rsi_prev - rsi_now > 2:
+                momentum_state = "cooling"
+            else:
+                momentum_state = "steady"
+    except Exception as e:
+        log.warning(f"[{state.symbol}] Trend/momentum read failed: {e}")
+
     _set_trade_snapshot(trade, {
+        "trend_direction": trend_direction,
+        "momentum_state": momentum_state,
         "structure_bias": "bullish" if result.bias == BULLISH else "bearish" if result.bias == BEARISH else None,
         "structure_last_break_kind": result.last_break.kind if result.last_break else None,
         "structure_last_break_price": round(result.last_break.price, 8) if result.last_break else None,

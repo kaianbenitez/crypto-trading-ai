@@ -5,6 +5,18 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Added trend/momentum to the open-position status line** (a gap from the
+  original scope — trend/momentum was supposed to ship alongside structure/
+  news in the last change, but only structure+news actually got wired up).
+  `agent/orchestrator.py`'s `_check_structure_alert` now also runs
+  `add_indicators` on the same 1h candles already fetched for structure
+  detection (no extra API calls) and derives trend direction (EMA fast vs.
+  slow) and momentum (RSI 3-bar delta: strengthening/cooling/steady).
+  Unlike structure bias (which stays blank until a confirmed BOS/CHoCH
+  occurs), trend/momentum are computed every check regardless — so the
+  dashboard status line now shows *something* on essentially every open
+  position, not just the ones where a structure break has already happened.
+
 - **Added swing-structure (BOS/CHoCH) detection, a Telegram alert on reversal,
   and a live status line on the dashboard.** New `agent/analysis/smc_structure.py`
   ports the swing-structure detection logic from LuxAlgo's "Smart Money

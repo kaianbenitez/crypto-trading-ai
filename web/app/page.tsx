@@ -39,12 +39,18 @@ const TRADE_REGIME_LABEL: Record<string, string> = {
 function friendlyStrategy(s?: string) { return s ? (STRATEGY_LABEL[s] ?? s.replace(/_/g, " ")) : "—"; }
 function friendlyTradeRegime(r?: string) { return r ? (TRADE_REGIME_LABEL[r] ?? r.replace(/_/g, " ")) : "—"; }
 
-// Compact one-line structure + news read for an open position. Structure
-// bias/break come from the trade's indicator_snapshot (written server-side
-// by agent.orchestrator._check_structure_alert); news from the same cached
+// Compact one-line trend/momentum/structure/news read for an open position.
+// Trend + momentum are always available (computed fresh from candles every
+// check); structure bias/break only appear once a confirmed BOS/CHoCH has
+// actually happened (can be blank for a while on a trending-without-a-pullback
+// symbol — that's expected, not missing data). All four come from the
+// trade's indicator_snapshot, written server-side by
+// agent.orchestrator._check_structure_alert; news from the same cached
 // sentiment the confidence-adjustment path reads. `warn` is true only for a
 // CHoCH against the trade's own direction — the one case worth a color call-out.
 function positionStatusLine(snapshot: Record<string, unknown> | undefined, side: string, news?: { label: string; score: number }): { text: string; warn: boolean } | null {
+  const trend = typeof snapshot?.trend_direction === "string" ? snapshot.trend_direction as string : undefined;
+  const momentum = typeof snapshot?.momentum_state === "string" ? snapshot.momentum_state as string : undefined;
   const bias = typeof snapshot?.structure_bias === "string" ? snapshot.structure_bias as string : undefined;
   const breakKind = typeof snapshot?.structure_last_break_kind === "string" ? snapshot.structure_last_break_kind as string : undefined;
   const against = breakKind === "CHoCH" && bias !== undefined && (
@@ -53,7 +59,9 @@ function positionStatusLine(snapshot: Record<string, unknown> | undefined, side:
   const hasNews = news && news.label !== "no data";
 
   const parts: string[] = [];
-  if (bias) parts.push(`${bias === "bullish" ? "Bullish" : "Bearish"} structure${breakKind ? ` (${breakKind})` : ""}`);
+  if (trend) parts.push(`${trend[0].toUpperCase()}${trend.slice(1)} (1h)`);
+  if (momentum && momentum !== "steady") parts.push(`momentum ${momentum}`);
+  if (bias) parts.push(`structure ${bias}${breakKind ? ` (${breakKind})` : ""}`);
   if (hasNews) parts.push(`news ${news!.label}`);
   if (parts.length === 0) return null;
   return { text: parts.join(" · ") + (against ? " — against this position" : ""), warn: against };
