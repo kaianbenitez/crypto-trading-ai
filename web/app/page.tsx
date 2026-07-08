@@ -229,6 +229,8 @@ function OpenPositionCard({ trade, detail, payload, live }: { trade: Trade; deta
 const OBVIOUS_EXIT_REASONS = new Set(["take_profit", "stop_loss"]);
 const EXIT_REASON_LABEL: Record<string, string> = {
   trailing_take_profit: "Trailing stop locked in the win",
+  trailing_stop: "Trailing stop hit (had moved from entry)",
+  max_hold_timeout: "Force-closed after max hold time",
   manual_reconcile_duplicate: "Closed manually (duplicate fix)",
 };
 function noteworthyExitReason(reason: string | null): string | null {

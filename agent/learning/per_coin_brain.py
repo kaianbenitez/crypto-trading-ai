@@ -187,7 +187,7 @@ class PerCoinBrain:
         snap = trade.get_indicator_snapshot()
         mfe = float(snap.get("mfe_r") or 0)
         exit_r = _r_multiple(trade)
-        if trade.exit_reason == "stop_loss" and mfe >= exit_r + 1.0:
+        if trade.exit_reason in ("stop_loss", "trailing_stop") and mfe >= exit_r + 1.0:
             params["trail_atr_mult"] = _clamp("trail_atr_mult", params["trail_atr_mult"] + 0.15)
             reasons.append("trail may be too tight: MFE materially exceeded exit R")
 

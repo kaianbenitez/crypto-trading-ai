@@ -709,6 +709,7 @@ def _check_close(adapter, session, risk, state) -> bool:
     if not trade:
         return True
 
+    force_closed = False
     live_qty: float | None = None
     try:
         open_positions = adapter.get_open_positions()
@@ -830,6 +831,7 @@ def _check_close(adapter, session, risk, state) -> bool:
                     log.error(f"[{state.symbol}] Force-close order failed: {e}")
                     return False
                 still_open = False
+                force_closed = True
 
         if still_open:
             return False
@@ -872,11 +874,38 @@ def _check_close(adapter, session, risk, state) -> bool:
 
     direction  = 1 if trade.side == "long" else -1
     raw_pnl    = (exit_price - trade.entry_price) * direction * full_qty
-    if raw_pnl > 0 and state.tp_trailing_active:
-        exit_reason = "trailing_take_profit"
-    else:
-        exit_reason = "take_profit" if raw_pnl > 0 else "stop_loss"
     outcome     = "win" if raw_pnl > 0 else ("loss" if raw_pnl < 0 else "breakeven")
+
+    # Classify exit_reason from what actually happened, not from PnL sign —
+    # PnL sign only coincidentally lines up with SL-vs-TP for an untrailed
+    # stop. A trailing SL that moved into profit (see TrailingStopManager)
+    # closes via the SL order and can be very profitable; the old
+    # `raw_pnl > 0 -> "take_profit"` heuristic mislabeled every one of those
+    # as a take-profit hit, and would equally mislabel a force-close
+    # (MAX_TRADE_HOURS) or a losing take-profit (slippage/fees) the other way.
+    filled_order_ids = {str(oid) for oid in (exit_fill or {}).get("order_ids", []) if oid}
+    if force_closed:
+        exit_reason = "max_hold_timeout"
+    elif state.tp_order_id and str(state.tp_order_id) in filled_order_ids:
+        exit_reason = "take_profit"
+    elif state.sl_order_id and str(state.sl_order_id) in filled_order_ids:
+        if state.tp_trailing_active:
+            exit_reason = "trailing_take_profit"  # runner: fixed TP was cancelled, trailing SL closed the win
+        elif state.be_armed:
+            exit_reason = "trailing_stop"          # stop had moved (trail/breakeven) before it was hit
+        else:
+            exit_reason = "stop_loss"              # original, never-moved stop was hit
+    else:
+        # No usable fill-id match — either exit_fill lacked order_ids, or
+        # neither known order id was in it (e.g. a stale id after a trail
+        # race). Best-effort fallback: same PnL-based guess as before, but
+        # still distinguishes a trailed stop from a real take-profit.
+        if raw_pnl > 0 and state.tp_trailing_active:
+            exit_reason = "trailing_take_profit"
+        elif raw_pnl > 0 and state.be_armed:
+            exit_reason = "trailing_stop"
+        else:
+            exit_reason = "take_profit" if raw_pnl > 0 else "stop_loss"
 
     trade.exit_price  = exit_price
     trade.pnl_usdt    = raw_pnl

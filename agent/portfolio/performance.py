@@ -301,6 +301,10 @@ def _compute_metrics_from_trades(all_trades: list[Trade], bankroll_usdt: float, 
             bucket = "stop_loss"
         elif reason == "trailing_take_profit":
             bucket = "trailing_take_profit"
+        elif reason == "trailing_stop":
+            bucket = "trailing_stop"
+        elif reason == "max_hold_timeout":
+            bucket = "max_hold_timeout"
         elif "manual" in reason:
             bucket = "manual"
         else:

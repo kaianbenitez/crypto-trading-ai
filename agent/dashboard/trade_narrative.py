@@ -360,7 +360,7 @@ def build_narrative(trade, session=None) -> TradeNarrative:
                     f"Don't treat a strong thesis as enough on its own when {weakness.split(':', 1)[0].strip().lower()} "
                     f"is present — require a stronger edge (higher EV), a better entry, or smaller size."
                 )
-            elif trade.exit_reason == "stop_loss":
+            elif trade.exit_reason in ("stop_loss", "trailing_stop"):
                 narrative.failure_line = "Stopped out before the setup could play out — no specific weakness was flagged at entry."
                 narrative.lesson_line = "Treat this as normal strategy variance rather than a pattern to fix."
             else:

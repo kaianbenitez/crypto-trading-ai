@@ -31,7 +31,7 @@ class Trade(Base):
 
     pnl_usdt = Column(Float, nullable=True)
     outcome = Column(String, nullable=True)              # "win" | "loss" | "breakeven"
-    exit_reason = Column(String, nullable=True)           # "stop_loss" | "take_profit" | "manual" | "kill_switch"
+    exit_reason = Column(String, nullable=True)           # "stop_loss" | "take_profit" | "trailing_stop" | "trailing_take_profit" | "max_hold_timeout" | "manual" | "kill_switch"
     postmortem = Column(Text, nullable=True)              # JSON list[str], filled on close
 
     opened_at = Column(DateTime, default=datetime.utcnow)

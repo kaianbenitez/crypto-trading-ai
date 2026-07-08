@@ -39,7 +39,7 @@ def tune_parameters(recent_trades: list[Trade], current_params: dict) -> dict:
     wins = [t for t in recent_trades if t.outcome == "win"]
     win_rate = len(wins) / len(recent_trades) if recent_trades else 0
 
-    sl_hit_losses = [t for t in losses if t.exit_reason == "stop_loss"]
+    sl_hit_losses = [t for t in losses if t.exit_reason in ("stop_loss", "trailing_stop")]
     sl_hit_ratio = len(sl_hit_losses) / len(recent_trades) if recent_trades else 0
 
     # Stops getting hit too often relative to overall sample -> widen SL distance
