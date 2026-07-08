@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Play, Prohibit, ArrowSquareOut, WarningCircle } from "@phosphor-icons/react";
-import { AgentStatus, api, CandlePayload, CoinDigest, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
+import { AgentStatus, api, CandlePayload, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
 import { money, pct, pnlColor, price4 } from "@/lib/format";
 import AuthGate from "./components/AuthGate";
 import Sidebar from "./components/Sidebar";
@@ -280,27 +280,6 @@ function TradeRow({ trade }: { trade: Trade }) {
   );
 }
 
-// ── coin watch ticker: compact daily read, full cards live on /coins ────────
-// This refreshes once a day (~9 PM PH) while everything else on the dashboard
-// refreshes every 15s — it doesn't earn the same visual weight as live data,
-// so it's a single scannable row here; the full digest cards are one click away.
-function CoinWatchTicker({ digest }: { digest: CoinDigest }) {
-  const coin = digest.symbol.replace("/USDT", "");
-  const change = digest.price_change_pct_24h;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: "var(--surface2)", borderRadius: "var(--radius-sm)", fontSize: "var(--text-2xs)" }}>
-      <CoinLogo symbol={digest.symbol} size={16} />
-      <span style={{ fontWeight: 700 }}>{coin}</span>
-      {change !== null && <span style={{ color: pnlColor(change), fontWeight: 600 }}>{pct(change)}</span>}
-      {digest.watching_side && digest.watch_low !== null && digest.watch_high !== null && (
-        <span style={{ color: "var(--muted)" }}>
-          watching <span style={{ color: digest.watching_side === "long" ? "var(--green)" : "var(--red)", fontWeight: 600 }}>{digest.watching_side.toUpperCase()}</span>
-        </span>
-      )}
-    </div>
-  );
-}
-
 // ── kill switch button ───────────────────────────────────────────────────────
 function KillSwitchButton({ killActive, toggling, confirming, onHalt, onConfirm, onCancel, onResume, cancelRef }: {
   killActive?: boolean; toggling: boolean; confirming: boolean;
@@ -341,7 +320,6 @@ function Dashboard() {
   const [positionDetails, setPositionDetails] = useState<OpenPositionDetail[]>([]);
   const [candlePayloads, setCandlePayloads] = useState<Record<string, CandlePayload>>({});
   const [livePositions, setLivePositions] = useState<Record<string, LivePosition>>({});
-  const [coinDigests, setCoinDigests] = useState<CoinDigest[]>([]);
   const [loading, setLoading] = useState(true);
   const [toggling,      setToggling]      = useState(false);
   const [confirmingHalt,setConfirmingHalt]= useState(false);
@@ -351,15 +329,14 @@ function Dashboard() {
 
   async function load() {
     try {
-      const [s, st, t, details, live, digests] = await Promise.all([
+      const [s, st, t, details, live] = await Promise.all([
         api.summary(),
         api.agentStatus(),
         api.trades(15),
         api.openPositionDetails(),
         api.livePositions().catch(() => []),
-        api.coinDigests().catch(() => []),
       ]);
-      setSummary(s); setStatus(st); setTrades(t); setPositionDetails(details); setCoinDigests(digests); setError(null);
+      setSummary(s); setStatus(st); setTrades(t); setPositionDetails(details); setError(null);
       const liveBySymbol: Record<string, LivePosition> = {};
       live.forEach(p => {
         const norm = p.symbol.includes("/") ? p.symbol : p.symbol.replace(/USDT$/, "/USDT");
@@ -535,21 +512,6 @@ function Dashboard() {
             )}
           </div>
         </Card>
-
-        {/* Coin watch: daily agent read, compact — full cards live on /coins */}
-        {coinDigests.length > 0 && (
-          <div style={{ marginTop: 18 }}>
-            <div style={{ marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-              <h2 style={{ fontSize: "var(--text-xs)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Coin Watch</h2>
-              <Link href="/coins" style={{ color: "var(--accent)", fontSize: "var(--text-2xs)", textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>
-                Full read <ArrowSquareOut size={11} />
-              </Link>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {coinDigests.map(d => <CoinWatchTicker key={d.symbol} digest={d} />)}
-            </div>
-          </div>
-        )}
 
       </main>
       </div>

@@ -133,6 +133,15 @@ class Settings:
     news_roster_refresh_minutes: int = int(os.getenv("NEWS_ROSTER_REFRESH_MINUTES", "30"))
     news_roster_batch_size: int = int(os.getenv("NEWS_ROSTER_BATCH_SIZE", "3"))
 
+    # Sentiment nudge on market-scan shortlisting (agent/adapt/roster.py) —
+    # unlike apply_sentiment_adjustment (a confidence nudge on trades already
+    # selected), this changes WHICH coins even become candidates. Default OFF:
+    # this is a bigger behavior change than a confidence tweak, and should be
+    # watched/validated before it's live. Reuses the same cached CoinDigest
+    # data the rolling refresh job already maintains — zero extra API cost.
+    market_scan_news_nudge_enabled: bool = os.getenv("MARKET_SCAN_NEWS_NUDGE_ENABLED", "false").lower() == "true"
+    market_scan_news_nudge_weight: float = float(os.getenv("MARKET_SCAN_NEWS_NUDGE_WEIGHT", "0.05"))
+
     # Dynamic two-stage market scanner (agent/adapt/roster.py). Stage 1 is one
     # cheap fetch_tickers() call across the whole exchange; only the top N
     # shortlisted symbols get the full indicator/MTF/EV stack (stage 2).

@@ -1117,7 +1117,7 @@ def run():
         # this call is a cheap no-op if the cache isn't stale yet). Keeps the
         # candidate pool warm between daily reviews and the API status fresh.
         try:
-            roster.refresh_market_scan()
+            roster.refresh_market_scan(session=session)
         except Exception as e:
             log.warning(f"Market scan refresh failed (continuing on fixed roster): {e}")
 

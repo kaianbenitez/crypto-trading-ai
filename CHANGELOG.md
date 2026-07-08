@@ -5,6 +5,25 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Removed Coin Watch from the dashboard; added an (off-by-default) news
+  nudge to market-scan shortlisting.** Two follow-ups to the rolling
+  news-refresh job:
+  - The dashboard no longer fetches or renders the daily coin-digest ticker
+    — it wasn't being read, and it was the last thing on the page not tied
+    to live trading state. The full per-coin digest still lives on `/coins`.
+    Removed the now-unused `coinDigests` state, its `api.coinDigests()` call,
+    and the `CoinWatchTicker` component from `web/app/page.tsx`.
+  - `agent/adapt/roster.py`'s `discover_market_universe` can now apply a
+    small (±0.05 default) sentiment nudge to each shortlist candidate's
+    ranking score, reusing the same cached `CoinDigest` data the rolling
+    refresh job already maintains — zero extra API cost. Gated behind
+    `MARKET_SCAN_NEWS_NUDGE_ENABLED` (default **false**): unlike the existing
+    confidence nudge (which only affects trades already selected), this
+    changes which coins even become candidates, so it stays off until
+    watched/validated. Symmetric by design (nudges both ways with sentiment
+    score, not just penalizing bad news) — a coin is never hard-blocked from
+    the shortlist over news, only nudged relative to its peers.
+
 - **Fixed dead news provider — migrated to marketaux.com.** `cryptocurrency.cv`
   (the free, no-key provider `agent/fundamental/news_sentiment.py` used for
   the daily coin digest) confirmed dead — every endpoint now returns HTTP 402

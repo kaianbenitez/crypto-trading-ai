@@ -196,10 +196,15 @@ def get_top_market_cap_symbols(force: bool = False) -> set[str] | None:
         return _market_cap_symbols  # serve the last good cache if we have one, else None
 
 
-def discover_market_universe(adapter) -> tuple[list[str], dict]:
+def discover_market_universe(adapter, session=None) -> tuple[list[str], dict]:
     """Stage 1 of the two-stage scanner: one cheap fetch_tickers() call
     across the exchange, filtered and ranked. Returns (selected_symbols, meta)
     where meta carries counts/reject-reasons for logging and API exposure.
+
+    `session`, when provided and MARKET_SCAN_NEWS_NUDGE_ENABLED is on, is used
+    to apply a small news-sentiment nudge to each candidate's score — see the
+    scoring block below. Optional and no-op by default: existing callers that
+    don't pass a session (or run with the flag off) are unaffected.
 
     Raises on any hard failure (network, adapter doesn't support it, etc.) —
     callers are expected to catch and fall back to CANDIDATE_SYMBOLS.
@@ -330,6 +335,26 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
             "spread_pct": spread_pct,
         })
 
+    news_nudge_by_symbol: dict[str, float] = {}
+    if candidates and settings.market_scan_news_nudge_enabled and session is not None:
+        # Small nudge from whatever's already cached by the rolling news
+        # refresh (agent/fundamental/news_refresh.py) — no extra API calls
+        # here, just a read of data that's already being kept fresh for the
+        # confidence-adjustment path. Unlike that path (which only affects
+        # trades already selected), this changes which coins even become
+        # candidates, so it's symmetric and small by design (±weight, default
+        # ±0.05) rather than a hard include/exclude — a coin isn't blocked
+        # from the shortlist over news, just nudged relative to its peers.
+        from agent.fundamental.coin_digest import cached_sentiment
+
+        for c in candidates:
+            try:
+                sentiment = cached_sentiment(session, c["symbol"])
+                if sentiment.label not in (None, "no data"):
+                    news_nudge_by_symbol[c["symbol"]] = sentiment.score * settings.market_scan_news_nudge_weight
+            except Exception as e:
+                log.warning(f"[{c['symbol']}] Cached sentiment read failed for scan nudge: {e}")
+
     if candidates:
         max_vol = max(c["quote_volume"] for c in candidates) or 1.0
         for c in candidates:
@@ -339,7 +364,8 @@ def discover_market_universe(adapter) -> tuple[list[str], dict]:
             # a bad candidate. Abnormal movers are already excluded above,
             # so this only ranks ordinary/healthy momentum among survivors.
             momentum_score = min(abs(c["pct_change"]) / 20.0, 1.0)
-            c["score"] = round(vol_score * 0.8 + momentum_score * 0.2, 4)
+            base_score = vol_score * 0.8 + momentum_score * 0.2
+            c["score"] = round(base_score + news_nudge_by_symbol.get(c["symbol"], 0.0), 4)
         candidates.sort(key=lambda c: c["score"], reverse=True)
 
     selected_candidates = candidates[: settings.market_scan_top_n]
@@ -386,11 +412,14 @@ class CoinRoster:
     # Dynamic market scan (stage 1) — candidate SOURCE, not a signal gate
     # ------------------------------------------------------------------
 
-    def refresh_market_scan(self, force: bool = False) -> list[str] | None:
+    def refresh_market_scan(self, force: bool = False, session=None) -> list[str] | None:
         """Refreshes the cached dynamic universe if the refresh interval has
         elapsed (or force=True). Returns the cached/new universe, or None if
         the scan is disabled/unsupported/failed — callers should fall back
-        to CANDIDATE_SYMBOLS in that case."""
+        to CANDIDATE_SYMBOLS in that case.
+
+        `session` is optional and only used to apply the news-sentiment scan
+        nudge (see discover_market_universe) when that flag is enabled."""
         if not settings.dynamic_market_scan or self.adapter is None:
             self._scan_meta = {"enabled": False, "status": "disabled", "last_scan_at": None}
             return None
@@ -404,7 +433,7 @@ class CoinRoster:
             return self._scan_cache
 
         try:
-            universe, meta = discover_market_universe(self.adapter)
+            universe, meta = discover_market_universe(self.adapter, session=session)
         except Exception as e:
             log.warning(f"Dynamic market scan failed, falling back to fixed roster: {e}")
             self._scan_meta = {
