@@ -39,6 +39,26 @@ const TRADE_REGIME_LABEL: Record<string, string> = {
 function friendlyStrategy(s?: string) { return s ? (STRATEGY_LABEL[s] ?? s.replace(/_/g, " ")) : "—"; }
 function friendlyTradeRegime(r?: string) { return r ? (TRADE_REGIME_LABEL[r] ?? r.replace(/_/g, " ")) : "—"; }
 
+// Compact one-line structure + news read for an open position. Structure
+// bias/break come from the trade's indicator_snapshot (written server-side
+// by agent.orchestrator._check_structure_alert); news from the same cached
+// sentiment the confidence-adjustment path reads. `warn` is true only for a
+// CHoCH against the trade's own direction — the one case worth a color call-out.
+function positionStatusLine(snapshot: Record<string, unknown> | undefined, side: string, news?: { label: string; score: number }): { text: string; warn: boolean } | null {
+  const bias = typeof snapshot?.structure_bias === "string" ? snapshot.structure_bias as string : undefined;
+  const breakKind = typeof snapshot?.structure_last_break_kind === "string" ? snapshot.structure_last_break_kind as string : undefined;
+  const against = breakKind === "CHoCH" && bias !== undefined && (
+    (side === "long" && bias === "bearish") || (side === "short" && bias === "bullish")
+  );
+  const hasNews = news && news.label !== "no data";
+
+  const parts: string[] = [];
+  if (bias) parts.push(`${bias === "bullish" ? "Bullish" : "Bearish"} structure${breakKind ? ` (${breakKind})` : ""}`);
+  if (hasNews) parts.push(`news ${news!.label}`);
+  if (parts.length === 0) return null;
+  return { text: parts.join(" · ") + (against ? " — against this position" : ""), warn: against };
+}
+
 function parseApiDate(value: string) {
   const normalized = value.includes("T") ? value : value.replace(" ", "T");
   return new Date(normalized.endsWith("Z") || normalized.includes("+") ? normalized : normalized + "Z");
@@ -125,6 +145,7 @@ function OpenPositionCard({ trade, detail, payload, live }: { trade: Trade; deta
   const note = detail ? detail.reasoning.thesis.join(" ") : specificReasoning(trade.entry_reasoning);
   const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
   const riskPct = typeof snapshot?.actual_risk_pct === "number" ? snapshot.actual_risk_pct : undefined;
+  const statusLine = positionStatusLine(snapshot, trade.side, detail?.news);
 
   return (
     <div className="ui-card" style={{ borderColor: `color-mix(in oklab, ${sideColor} 22%, var(--border))` }}>
@@ -176,6 +197,13 @@ function OpenPositionCard({ trade, detail, payload, live }: { trade: Trade; deta
           {" · "}
           <span style={{ color: "var(--green)" }}>TP {price4.format(trade.take_profit)}</span>
         </div>
+
+        {statusLine && (
+          <div style={{ color: statusLine.warn ? "var(--amber)" : "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4, display: "flex", gap: 4, alignItems: "flex-start", marginBottom: 8 }}>
+            {statusLine.warn && <WarningCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />}
+            <span>{statusLine.text}</span>
+          </div>
+        )}
 
         {detail?.reasoning.weakness && (
           <div style={{ color: "var(--amber)", fontSize: "var(--text-2xs)", lineHeight: 1.4, display: "flex", gap: 4, alignItems: "flex-start", marginBottom: note ? 8 : 0 }}>

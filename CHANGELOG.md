@@ -5,6 +5,36 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Added swing-structure (BOS/CHoCH) detection, a Telegram alert on reversal,
+  and a live status line on the dashboard.** New `agent/analysis/smc_structure.py`
+  ports the swing-structure detection logic from LuxAlgo's "Smart Money
+  Concepts" Pine Script indicator (CC BY-NC-SA 4.0, private use — not
+  redistributed; only the ~80-line pivot/BOS/CHoCH mechanism, not the
+  order-block/FVG/zone chart-drawing features). Verified against synthetic
+  data: a first-ever break in a series always classifies as BOS (matches the
+  source indicator's own behavior — its trend bias also starts at neither
+  bullish nor bearish), and a genuine reversal after an established bias
+  correctly classifies as CHoCH.
+  - `agent/orchestrator.py`'s `_check_structure_alert` runs this per open
+    position on its own cadence (`SMC_STRUCTURE_CHECK_MINUTES`, default 15 —
+    1h structure doesn't change fast enough to need checking every 60s main
+    loop cycle), persists the read into the trade's `indicator_snapshot`,
+    and fires a Telegram alert **only** for a fresh CHoCH against the
+    position's own direction (a BOS, i.e. structure still agreeing with the
+    trade, never pings) — deduped so the same break never re-fires.
+  - `/api/open-positions-detail` now also returns cached news sentiment
+    (`news: {label, score}`) per open position, reusing the rolling refresh
+    job's cache — zero extra API cost.
+  - The dashboard's open-position card shows a compact structure + news
+    status line (e.g. "Bearish structure (CHoCH) · news negative — against
+    this position"), colored amber only when structure has turned against
+    the trade — everything else stays neutral-muted, consistent with the
+    density work done earlier this week.
+
+- **Turned on the market-scan news nudge in production** (`MARKET_SCAN_NEWS_NUDGE_ENABLED=true`,
+  set directly in the VPS `.env` — was shipped default-off below). Deliberate choice
+  to actively use it now rather than leave it observing only.
+
 - **Removed Coin Watch from the dashboard; added an (off-by-default) news
   nudge to market-scan shortlisting.** Two follow-ups to the rolling
   news-refresh job:

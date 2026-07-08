@@ -15,6 +15,7 @@ from agent.dashboard.candlestick_panel import build_candlestick_payload
 from agent.dashboard.plain_english import simplify_lines
 from agent.dashboard.reasoning_engine import position_reasoning
 from agent.dashboard.trade_narrative import build_narrative
+from agent.fundamental.coin_digest import cached_sentiment
 from agent.risk.bankroll import latest_risk_snapshot
 from webapi import app_state  # noqa: F401 (registers AgentState on the shared Base)
 from webapi.app_state import get_or_create_state
@@ -384,8 +385,10 @@ def open_positions_detail(session=Depends(db), _=Depends(require_session)):
         .order_by(Trade.opened_at.desc())
         .all()
     )
-    return [
-        {
+    result = []
+    for t in trades:
+        sentiment = cached_sentiment(session, t.symbol)
+        result.append({
             "trade": {
                 "id": t.id,
                 "symbol": t.symbol,
@@ -407,9 +410,9 @@ def open_positions_detail(session=Depends(db), _=Depends(require_session)):
                     .count()
                 ),
             }, session=session),
-        }
-        for t in trades
-    ]
+            "news": {"label": sentiment.label, "score": sentiment.score},
+        })
+    return result
 
 
 @app.get("/api/candles/{symbol:path}")

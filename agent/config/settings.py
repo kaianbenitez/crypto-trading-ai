@@ -142,6 +142,16 @@ class Settings:
     market_scan_news_nudge_enabled: bool = os.getenv("MARKET_SCAN_NEWS_NUDGE_ENABLED", "false").lower() == "true"
     market_scan_news_nudge_weight: float = float(os.getenv("MARKET_SCAN_NEWS_NUDGE_WEIGHT", "0.05"))
 
+    # SMC swing-structure (BOS/CHoCH) — display/alert only, never a gate or
+    # confidence input (see agent/analysis/smc_structure.py). Checked on its
+    # own cadence per open position, independent of the 60s main loop, since
+    # 1h swing structure doesn't change fast enough to need checking every
+    # cycle. A Telegram alert fires only for a fresh CHoCH against the open
+    # position's own side — a BOS (continuation) never pings.
+    smc_structure_enabled: bool = os.getenv("SMC_STRUCTURE_ENABLED", "true").lower() == "true"
+    smc_structure_pivot_size: int = int(os.getenv("SMC_STRUCTURE_PIVOT_SIZE", "50"))
+    smc_structure_check_minutes: int = int(os.getenv("SMC_STRUCTURE_CHECK_MINUTES", "15"))
+
     # Dynamic two-stage market scanner (agent/adapt/roster.py). Stage 1 is one
     # cheap fetch_tickers() call across the whole exchange; only the top N
     # shortlisted symbols get the full indicator/MTF/EV stack (stage 2).

@@ -104,6 +104,7 @@ export interface OpenPositionDetail {
     | "indicator_snapshot"
   >;
   reasoning: PositionReasoning;
+  news: { label: string; score: number };
 }
 
 export interface CandlePoint {

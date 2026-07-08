@@ -44,6 +44,7 @@ from agent.adapt.weights import update_weights, apply_weights
 from agent.adapt.roster import CoinRoster, CANDIDATE_SYMBOLS
 from agent.fundamental.coin_digest import apply_sentiment_adjustment, build_all_digests, save_digest
 from agent.fundamental.news_refresh import refresh_position_news, refresh_roster_batch
+from agent.analysis.smc_structure import BEARISH, BULLISH, compute_structure
 from agent.fundamental.macro import assess_macro
 from agent.learning.per_coin_brain import PerCoinBrain
 from agent.risk.bankroll import BankrollManager
@@ -421,6 +422,8 @@ class SymbolState:
         )
         self.be_armed      = False
         self.tp_trailing_active = False
+        self.last_structure_check: datetime | None = None
+        self.last_alerted_choch_at: datetime | None = None  # candle timestamp of the last CHoCH we alerted on
 
 
 @dataclass
@@ -705,6 +708,64 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
     return True
 
 
+def _check_structure_alert(adapter, session, state, trade: Trade) -> None:
+    """Fetches 1h candles for this open position, persists the current
+    structure read (bias + last break) into the trade's indicator_snapshot
+    for the dashboard to display, and checks for a fresh CHoCH against the
+    trade's own direction — the one structure event worth a Telegram ping (a
+    BOS, i.e. structure still agreeing with the trade, never alerts). Own
+    cadence (SMC_STRUCTURE_CHECK_MINUTES), independent of the 60s main loop —
+    1h swing structure doesn't change fast enough to be worth checking every
+    cycle. Never raises; a failure here must not affect trailing-stop/exit
+    logic running in the same cycle."""
+    if not settings.smc_structure_enabled:
+        return
+    now = datetime.now(timezone.utc)
+    if (
+        state.last_structure_check is not None
+        and (now - state.last_structure_check).total_seconds() < settings.smc_structure_check_minutes * 60
+    ):
+        return
+    state.last_structure_check = now
+
+    try:
+        candles = adapter.fetch_ohlcv(state.symbol, "1h", limit=max(settings.smc_structure_pivot_size * 2, 100))
+        df = pd.DataFrame([{
+            "high": c.high, "low": c.low, "close": c.close, "timestamp": c.timestamp,
+        } for c in candles]).sort_values("timestamp").reset_index(drop=True)
+    except Exception as e:
+        log.warning(f"[{state.symbol}] Structure check candle fetch failed: {e}")
+        return
+
+    result = compute_structure(df, size=settings.smc_structure_pivot_size)
+    _set_trade_snapshot(trade, {
+        "structure_bias": "bullish" if result.bias == BULLISH else "bearish" if result.bias == BEARISH else None,
+        "structure_last_break_kind": result.last_break.kind if result.last_break else None,
+        "structure_last_break_price": round(result.last_break.price, 8) if result.last_break else None,
+        "structure_checked_at": now.isoformat(),
+    })
+    session.commit()
+
+    brk = result.last_break
+    if brk is None or brk.kind != "CHoCH":
+        return
+
+    against_trade = (
+        (trade.side == "long" and brk.direction == BEARISH)
+        or (trade.side == "short" and brk.direction == BULLISH)
+    )
+    if not against_trade:
+        return
+
+    break_at = df.iloc[brk.bar_index]["timestamp"]
+    if state.last_alerted_choch_at is not None and break_at <= state.last_alerted_choch_at:
+        return  # already alerted on this exact break
+
+    state.last_alerted_choch_at = break_at
+    log.info(f"[{state.symbol}] CHoCH against {trade.side} position at {brk.price:.4f}")
+    _tg(tg_templates.choch_alert(state.symbol, trade.side, brk.price))
+
+
 def _check_close(adapter, session, risk, state) -> bool:
     trade = session.get(Trade, state.open_trade_id)
     if not trade:
@@ -781,6 +842,11 @@ def _check_close(adapter, session, risk, state) -> bool:
                 _maybe_activate_trailing_take_profit(adapter, session, state, trade, trail_df, trade_params)
         except Exception as e:
             log.warning(f"[{state.symbol}] trailing stop check failed: {e}")
+
+        try:
+            _check_structure_alert(adapter, session, state, trade)
+        except Exception as e:
+            log.warning(f"[{state.symbol}] Structure alert check failed: {e}")
 
         if False and not state.be_armed:
             try:

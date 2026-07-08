@@ -89,6 +89,23 @@ def trail(symbol: str, old_stop: float, new_stop: float, mode: str, reason: str)
     )
 
 
+def choch_alert(symbol: str, trade_side: str, price: float) -> str:
+    """CHoCH (change of character) against an open position's direction —
+    the one structure event worth interrupting someone for. A BOS
+    (continuation, structure still agrees with the trade) never fires this;
+    see agent/analysis/smc_structure.py."""
+    new_bias = "bullish" if trade_side == "short" else "bearish"
+    return (
+        f"🔀 CHoCH DETECTED | {symbol}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Structure just turned {new_bias} — against your {trade_side.upper()} position.\n"
+        f"Broke through `{price:.4f}`.\n"
+        f"This doesn't close the trade — your stop/target are unchanged — but it's "
+        f"worth a look; the trend that supported this trade may be reversing.\n\n"
+        f"⏰ {_ts()}"
+    )
+
+
 def coin_digest_report(digests: list) -> str:
     lines = [f"🗞 Daily Coin Digest — {_ts()}", "━━━━━━━━━━━━━━━━━━━━"]
     for d in digests:
