@@ -5,6 +5,15 @@ Format is informal — one entry per meaningful change, not strict Keep a Change
 
 ## 2026-07-09
 
+- **Rewrote the position status line as actual prose, not a tag line.** The
+  original ask was a 1-2 sentence plain-English paragraph ("Option C" from
+  the earlier design brainstorm); what shipped was a pipe-separated tag
+  string ("Bearish (1h) · momentum cooling · news positive"). Rewrote
+  `positionStatusLine` in `web/app/page.tsx` to compose real sentences from
+  the same underlying data — e.g. "Bearish on the 1h, but momentum is
+  fading — could stall or pull back soon. Structure just reversed — a
+  CHoCH turned the swing bias bullish, which is against this position."
+
 - **Added trend/momentum to the open-position status line** (a gap from the
   original scope — trend/momentum was supposed to ship alongside structure/
   news in the last change, but only structure+news actually got wired up).

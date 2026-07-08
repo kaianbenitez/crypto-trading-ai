@@ -39,11 +39,12 @@ const TRADE_REGIME_LABEL: Record<string, string> = {
 function friendlyStrategy(s?: string) { return s ? (STRATEGY_LABEL[s] ?? s.replace(/_/g, " ")) : "—"; }
 function friendlyTradeRegime(r?: string) { return r ? (TRADE_REGIME_LABEL[r] ?? r.replace(/_/g, " ")) : "—"; }
 
-// Compact one-line trend/momentum/structure/news read for an open position.
-// Trend + momentum are always available (computed fresh from candles every
-// check); structure bias/break only appear once a confirmed BOS/CHoCH has
-// actually happened (can be blank for a while on a trending-without-a-pullback
-// symbol — that's expected, not missing data). All four come from the
+// Plain-English 1-2 sentence status read for an open position — trend +
+// momentum, whether structure just broke, and news, composed as prose
+// (not a tag line). Trend/momentum are always available (computed fresh
+// from candles every check); the structure sentence only appears once a
+// confirmed BOS/CHoCH has actually happened (silence until then is
+// expected — nothing broke yet, not missing data). All come from the
 // trade's indicator_snapshot, written server-side by
 // agent.orchestrator._check_structure_alert; news from the same cached
 // sentiment the confidence-adjustment path reads. `warn` is true only for a
@@ -58,13 +59,27 @@ function positionStatusLine(snapshot: Record<string, unknown> | undefined, side:
   );
   const hasNews = news && news.label !== "no data";
 
-  const parts: string[] = [];
-  if (trend) parts.push(`${trend[0].toUpperCase()}${trend.slice(1)} (1h)`);
-  if (momentum && momentum !== "steady") parts.push(`momentum ${momentum}`);
-  if (bias) parts.push(`structure ${bias}${breakKind ? ` (${breakKind})` : ""}`);
-  if (hasNews) parts.push(`news ${news!.label}`);
-  if (parts.length === 0) return null;
-  return { text: parts.join(" · ") + (against ? " — against this position" : ""), warn: against };
+  const sentences: string[] = [];
+
+  if (trend) {
+    const trendWord = trend === "bullish" ? "Bullish" : trend === "bearish" ? "Bearish" : "Trading sideways";
+    let s = `${trendWord} on the 1h`;
+    if (momentum === "cooling") s += ", but momentum is fading — could stall or pull back soon";
+    else if (momentum === "strengthening") s += ", and momentum is picking up";
+    sentences.push(s + ".");
+  }
+
+  if (bias && breakKind) {
+    const breakWord = breakKind === "CHoCH" ? "just reversed" : "confirmed the move";
+    let s = `Structure ${breakWord} — a ${breakKind} turned the swing bias ${bias}`;
+    s += against ? ", which is against this position." : ".";
+    sentences.push(s);
+  }
+
+  if (hasNews) sentences.push(`News sentiment is ${news!.label}.`);
+
+  if (sentences.length === 0) return null;
+  return { text: sentences.join(" "), warn: against };
 }
 
 function parseApiDate(value: string) {
@@ -207,8 +222,8 @@ function OpenPositionCard({ trade, detail, payload, live }: { trade: Trade; deta
         </div>
 
         {statusLine && (
-          <div style={{ color: statusLine.warn ? "var(--amber)" : "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4, display: "flex", gap: 4, alignItems: "flex-start", marginBottom: 8 }}>
-            {statusLine.warn && <WarningCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} />}
+          <div style={{ color: statusLine.warn ? "var(--amber)" : "var(--muted)", fontSize: "var(--text-xs)", lineHeight: 1.5, display: "flex", gap: 5, alignItems: "flex-start", marginBottom: 8 }}>
+            {statusLine.warn && <WarningCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />}
             <span>{statusLine.text}</span>
           </div>
         )}
