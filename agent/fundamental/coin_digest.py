@@ -12,7 +12,7 @@ from agent.backtest.validate import BASE_PARAMS
 from agent.config.settings import settings
 from agent.dashboard.plain_english import friendly_regime, simplify_line
 from agent.fundamental.market_context import add_market_context
-from agent.fundamental.news_sentiment import get_sentiment
+from agent.fundamental.news_sentiment import NewsSentiment
 from agent.strategy.ensemble import generate_signal
 from agent.strategy.indicators import add_indicators
 from agent.strategy.smc import add_smc
@@ -41,7 +41,39 @@ def _prepare(df: pd.DataFrame, params: dict) -> pd.DataFrame:
     return df.dropna().reset_index(drop=True)
 
 
-def build_coin_digest(symbol: str, adapter, params: dict | None = None) -> CoinDigestResult:
+def _latest_digest_row(session, symbol: str):
+    from agent.db.models import CoinDigest
+
+    return (
+        session.query(CoinDigest)
+        .filter(CoinDigest.symbol == symbol)
+        .order_by(CoinDigest.created_at.desc())
+        .first()
+    )
+
+
+def cached_sentiment(session, symbol: str, max_age_hours: float = 36) -> NewsSentiment:
+    """Reads whatever agent.fundamental.news_refresh last wrote for this
+    symbol — never calls the news API itself. That module owns all live
+    Marketaux calls now, on its own budget-aware cadence; this is a free,
+    local read of its output, safe to call as often as needed (e.g. every
+    daily digest build, every entry evaluation)."""
+    from datetime import datetime, timedelta, timezone
+
+    row = _latest_digest_row(session, symbol)
+    if not row or row.sentiment_label in (None, "no data"):
+        return NewsSentiment(score=0.0, label="no data", headlines=[])
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=max_age_hours)
+    if row.created_at is not None and row.created_at < cutoff:
+        return NewsSentiment(score=0.0, label="no data", headlines=[])
+    return NewsSentiment(
+        score=row.sentiment_score or 0.0,
+        label=row.sentiment_label or "no data",
+        headlines=row.get_headlines(),
+    )
+
+
+def build_coin_digest(symbol: str, adapter, session, params: dict | None = None) -> CoinDigestResult:
     params = params or dict(BASE_PARAMS, context_window_candles=120, max_atr_ratio=2.5)
 
     candles = adapter.fetch_ohlcv(symbol, "1h", limit=200)
@@ -83,7 +115,10 @@ def build_coin_digest(symbol: str, adapter, params: dict | None = None) -> CoinD
                 else:
                     watch_low, watch_high = close, close + atr * sl_mult
 
-    sentiment = get_sentiment(symbol)
+    # Reads the news_refresh-maintained cache rather than calling the API —
+    # this function can run on a cheap, frequent, purely-local cadence
+    # without touching the Marketaux daily quota at all.
+    sentiment = cached_sentiment(session, symbol)
     coin = symbol.split("/")[0]
 
     parts = []
@@ -125,50 +160,37 @@ def build_coin_digest(symbol: str, adapter, params: dict | None = None) -> CoinD
     )
 
 
-def build_all_digests(symbols: list[str], adapter) -> list[CoinDigestResult]:
+def build_all_digests(symbols: list[str], adapter, session) -> list[CoinDigestResult]:
     results = []
     for symbol in symbols:
         try:
-            results.append(build_coin_digest(symbol, adapter))
+            results.append(build_coin_digest(symbol, adapter, session))
         except Exception:
             continue
     return results
 
 
 def apply_sentiment_adjustment(symbol: str, signal, session) -> float:
-    """Nudge confidence using the most recent daily sentiment read, if still
+    """Nudge confidence using the most recent cached sentiment read, if still
     fresh. Kept soft, like the existing memory/weight adjustments — sentiment
     never blocks a trade, it only tilts confidence a little."""
-    from datetime import datetime, timedelta, timezone
-
-    from agent.db.models import CoinDigest
-
-    row = (
-        session.query(CoinDigest)
-        .filter(CoinDigest.symbol == symbol)
-        .order_by(CoinDigest.created_at.desc())
-        .first()
-    )
-    if not row or row.sentiment_label in (None, "no data", "neutral"):
-        return 0.0
-
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=36)
-    if row.created_at is not None and row.created_at < cutoff:
+    sentiment = cached_sentiment(session, symbol)
+    if sentiment.label in (None, "no data", "neutral"):
         return 0.0
 
     aligned = (
-        (signal.side.value == "long" and row.sentiment_label == "positive")
-        or (signal.side.value == "short" and row.sentiment_label == "negative")
+        (signal.side.value == "long" and sentiment.label == "positive")
+        or (signal.side.value == "short" and sentiment.label == "negative")
     )
     opposed = (
-        (signal.side.value == "long" and row.sentiment_label == "negative")
-        or (signal.side.value == "short" and row.sentiment_label == "positive")
+        (signal.side.value == "long" and sentiment.label == "negative")
+        or (signal.side.value == "short" and sentiment.label == "positive")
     )
     if aligned:
-        signal.reasoning.append(f"News sentiment {row.sentiment_label} — small confidence boost")
+        signal.reasoning.append(f"News sentiment {sentiment.label} — small confidence boost")
         return 0.05
     if opposed:
-        signal.reasoning.append(f"News sentiment {row.sentiment_label} — confidence reduced")
+        signal.reasoning.append(f"News sentiment {sentiment.label} — confidence reduced")
         return -0.05
     return 0.0
 

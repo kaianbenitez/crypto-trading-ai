@@ -80,6 +80,44 @@ def fetch_articles(symbol: str, limit: int | None = None) -> list[dict]:
         return []
 
 
+def fetch_articles_multi(symbols: list[str], limit: int | None = None) -> list[dict]:
+    """One batched call covering several coins at once — costs a single
+    request against the daily quota, at the cost of smaller/less-newsworthy
+    coins in the batch sometimes being crowded out (the free tier caps every
+    response at ~3 articles total, not per-symbol — confirmed empirically,
+    `limit` is silently capped regardless of what's requested). Use this for
+    broad, lower-priority roster coverage; use `fetch_articles`/`get_sentiment`
+    per-symbol for anything where a real catalyst must not be missed (e.g. an
+    open position). Never raises."""
+    if not settings.news_enabled or not symbols:
+        return []
+    if not settings.marketaux_api_key:
+        log.warning("MARKETAUX_API_KEY not set — news disabled until configured")
+        return []
+    limit = limit or settings.news_max_headlines
+    symbols_param = ",".join(f"CC:{_coin_code(s)}" for s in symbols)
+    try:
+        resp = requests.get(
+            settings.news_api_url,
+            params={
+                "symbols": symbols_param,
+                "entity_types": "cryptocurrency",
+                "language": "en",
+                "sort": "published_desc",
+                "limit": limit,
+                "api_token": settings.marketaux_api_key,
+            },
+            timeout=settings.news_timeout_sec,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        articles = body.get("data")
+        return articles if isinstance(articles, list) else []
+    except Exception as e:
+        log.warning(f"Batched news fetch failed ({symbols_param}): {e}")
+        return []
+
+
 def fetch_headlines(symbol: str, limit: int | None = None) -> list[str]:
     """Headline strings only — kept for any caller that just wants text."""
     headlines = []
@@ -103,17 +141,22 @@ def score_headlines(articles: list[dict], symbol: str) -> NewsSentiment:
         title = a.get("title")
         if not title:
             continue
+        # Only count/keep this article if it actually mentions *this* coin's
+        # entity — required once `articles` can come from a multi-symbol
+        # batch fetch (fetch_articles_multi), where most articles in the
+        # list are about other coins in the same batch, not this one.
+        entity = next(
+            (e for e in (a.get("entities") or []) if str(e.get("symbol", "")).upper() == f"CC:{coin}"),
+            None,
+        )
+        if entity is None:
+            continue
+        matched_score = entity.get("sentiment_score")
+        if not isinstance(matched_score, (int, float)):
+            continue
         description = a.get("description")
         headlines.append(f"{title}. {description}" if description else title)
-        # Use the sentiment marketaux attached to *this coin's* entity match,
-        # not a whole-article average — an article can be bullish on one coin
-        # and bearish on another it also mentions.
-        for entity in a.get("entities") or []:
-            if str(entity.get("symbol", "")).upper() == f"CC:{coin}":
-                s = entity.get("sentiment_score")
-                if isinstance(s, (int, float)):
-                    scores.append(float(s))
-                break
+        scores.append(float(matched_score))
 
     if not scores:
         return NewsSentiment(score=0.0, label="no data", headlines=headlines[:3])

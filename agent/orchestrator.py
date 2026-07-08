@@ -43,6 +43,7 @@ from agent.adapt.memory import save_lesson, apply_memory
 from agent.adapt.weights import update_weights, apply_weights
 from agent.adapt.roster import CoinRoster, CANDIDATE_SYMBOLS
 from agent.fundamental.coin_digest import apply_sentiment_adjustment, build_all_digests, save_digest
+from agent.fundamental.news_refresh import refresh_position_news, refresh_roster_batch
 from agent.fundamental.macro import assess_macro
 from agent.learning.per_coin_brain import PerCoinBrain
 from agent.risk.bankroll import BankrollManager
@@ -1082,6 +1083,9 @@ def run():
     last_bankroll_sync = time.time()
     last_coin_digest_date = ""  # UTC date string of last coin-digest run
     digest_utc_hour = (settings.coin_digest_hour_ph - 8) % 24
+    last_position_news_refresh: datetime | None = None
+    last_roster_news_refresh: datetime | None = None
+    roster_news_batch_index = 0
 
     log.info(f"Roster: {roster.get_active()}")
     _tg(f"🤖 Trading bot started\nSymbols: {', '.join(roster.get_active())}\nMacro: {macro.regime}")
@@ -1129,11 +1133,12 @@ def run():
             log.info(f"Daily review done. Active: {roster.get_active()}")
             last_daily_review = now_utc.hour
 
-        # --- Daily coin digest: price action + agent's read + news sentiment ---
+        # --- Daily coin digest: price action + agent's read (news sentiment
+        #     is read from cache here, not fetched — see news refresh below) ---
         today_str = now_utc.strftime("%Y-%m-%d")
         if now_utc.hour == digest_utc_hour and last_coin_digest_date != today_str:
             try:
-                digests = build_all_digests(roster.get_active(), adapter)
+                digests = build_all_digests(roster.get_active(), adapter, session)
                 for result in digests:
                     save_digest(session, result)
                 if digests:
@@ -1142,6 +1147,36 @@ def run():
             except Exception as e:
                 log.warning(f"Coin digest run failed: {e}")
             last_coin_digest_date = today_str
+
+        # --- Rolling news-sentiment refresh (replaces per-symbol fetching
+        #     inside the digest above as the source of freshness) — two
+        #     independent cadences so open positions and the wider roster
+        #     both stay covered without exceeding the free-tier daily quota.
+        #     See agent/fundamental/news_refresh.py for the budget math. ---
+        if settings.news_enabled:
+            if (
+                last_position_news_refresh is None
+                or (now_utc - last_position_news_refresh).total_seconds() >= settings.news_position_refresh_minutes * 60
+            ):
+                open_symbols = [s.symbol for s in states.values() if s.open_trade_id]
+                if open_symbols:
+                    try:
+                        refresh_position_news(session, open_symbols)
+                    except Exception as e:
+                        log.warning(f"Position news refresh failed: {e}")
+                last_position_news_refresh = now_utc
+
+            if (
+                last_roster_news_refresh is None
+                or (now_utc - last_roster_news_refresh).total_seconds() >= settings.news_roster_refresh_minutes * 60
+            ):
+                try:
+                    roster_news_batch_index = refresh_roster_batch(
+                        session, roster.get_active(), roster_news_batch_index, settings.news_roster_batch_size,
+                    )
+                except Exception as e:
+                    log.warning(f"Roster news batch refresh failed: {e}")
+                last_roster_news_refresh = now_utc
 
         # Track whether this cycle processes a new candle
         new_candle_this_cycle = False

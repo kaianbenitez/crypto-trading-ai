@@ -121,6 +121,18 @@ class Settings:
     news_timeout_sec: int = int(os.getenv("NEWS_TIMEOUT_SEC", "8"))
     news_max_headlines: int = int(os.getenv("NEWS_MAX_HEADLINES", "5"))
 
+    # Rolling news-sentiment refresh (agent/fundamental/news_refresh.py) —
+    # replaces the old once-daily digest fetch as the source of sentiment
+    # freshness. Two lanes so the whole roster stays continuously refreshed
+    # instead of one daily burst, while staying under the 100/day free quota:
+    # open positions get an individual call each on their own cadence; the
+    # active roster is refreshed in small batches on a separate, tighter
+    # cadence. At defaults (2 positions hourly + 3-coin batches every 30 min)
+    # this uses roughly 48 + 48 = 96 calls/day.
+    news_position_refresh_minutes: int = int(os.getenv("NEWS_POSITION_REFRESH_MINUTES", "60"))
+    news_roster_refresh_minutes: int = int(os.getenv("NEWS_ROSTER_REFRESH_MINUTES", "30"))
+    news_roster_batch_size: int = int(os.getenv("NEWS_ROSTER_BATCH_SIZE", "3"))
+
     # Dynamic two-stage market scanner (agent/adapt/roster.py). Stage 1 is one
     # cheap fetch_tickers() call across the whole exchange; only the top N
     # shortlisted symbols get the full indicator/MTF/EV stack (stage 2).
