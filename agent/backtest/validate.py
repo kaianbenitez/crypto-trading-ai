@@ -33,6 +33,9 @@ BASE_PARAMS = {
     "reentry_max_trades_per_symbol_per_day": 3,
     "reentry_min_ev_multiplier": 1.5,
     "min_stop_cost_multiple": 5.0,
+    # Tier-2 trend entries require price still within this many ATRs of
+    # ema_fast — blocks late/extended entries where the move has already run.
+    "max_trend_extension_atr": 1.5,
 }
 
 

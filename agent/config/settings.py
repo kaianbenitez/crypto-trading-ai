@@ -98,6 +98,13 @@ class Settings:
     # default raised so recovery reflects a real signal, not variance.
     risk_recovery_loss_streak_trigger: int = int(os.getenv("RISK_RECOVERY_LOSS_STREAK_TRIGGER", "3"))
 
+    # Timestamp of the last strategy-logic change (ISO date). Trades opened
+    # before this date used different entry rules — filter them out when
+    # evaluating the current logic so an old regime's trades don't dilute
+    # the readiness-gate stats. Update this string whenever trend/mean-reversion
+    # signal logic changes.
+    strategy_epoch: str = os.getenv("STRATEGY_EPOCH", "2026-07-13")
+
     reentry_max_trades_per_symbol_per_day: int = int(os.getenv("REENTRY_MAX_TRADES_PER_SYMBOL_PER_DAY", "3"))
     reentry_min_ev_multiplier: float = float(os.getenv("REENTRY_MIN_EV_MULTIPLIER", "1.5"))
 
