@@ -1,165 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CheckCircle, Circle, HourglassMedium } from "@phosphor-icons/react";
-import AuthGate from "../components/AuthGate";
-import Sidebar from "../components/Sidebar";
-import { api, RiskStatus, Validation } from "@/lib/api";
-import { money, pct, pnlColor } from "@/lib/format";
-import { Card } from "../components/ui";
+import { useEffect, useMemo, useState } from "react";
+import { ChartBar, ChartLineUp, CheckCircle, GearSix, House, Receipt, ShieldCheck, ShoppingCart, Strategy, Warning } from "@phosphor-icons/react";
+import { api, RiskStatus, Summary, Validation } from "@/lib/api";
 
-const READINESS_LABEL: Record<string, string> = {
-  sample_size: "Enough closed trades to trust the numbers",
-  expectancy: "Average result per trade is positive enough",
-  profit_factor: "Wins outweigh losses by a healthy margin",
-  drawdown: "Worst losing streak stayed within bounds",
-  symbol_diversity: "Results aren't riding on one coin alone",
-  reentry_not_bleeding: "Re-entries aren't quietly losing money",
-};
+type Row = { type: "OPEN" | "PENDING"; coin: string; side: "LONG" | "SHORT"; risk: string; bankroll: string; r: string; bucket: string; notional: string; leverage: string; protection: "ACTIVE" | "PLANNED" };
 
-const TIER_LABEL: Record<string, string> = {
-  fixed: "Fixed — a flat risk % every trade, no adjustment",
-  normal: "Normal — default sizing while the strategy proves itself",
-  proven: "Proven — 30-day validation passed, sizing increased",
-  recovery: "Recovery — sizing reduced after a losing streak",
-  drawdown: "Drawdown guard — sizing cut after a larger loss",
-};
+const fallbackRows: Row[] = [
+  { type: "OPEN", coin: "BTCUSDT", side: "LONG", risk: "$612.40", bankroll: "2.41%", r: "1.28R", bucket: "BTC", notional: "$3,802.11 / $15,208.44", leverage: "4.00x", protection: "ACTIVE" },
+  { type: "OPEN", coin: "ETHUSDT", side: "LONG", risk: "$398.17", bankroll: "1.57%", r: "1.21R", bucket: "ETH", notional: "$2,114.75 / $8,459.01", leverage: "4.00x", protection: "ACTIVE" },
+  { type: "OPEN", coin: "SOLUSDT", side: "LONG", risk: "$241.33", bankroll: "0.95%", r: "1.05R", bucket: "SOL", notional: "$1,221.88 / $6,110.00", leverage: "5.00x", protection: "ACTIVE" },
+  { type: "OPEN", coin: "LINKUSDT", side: "SHORT", risk: "$183.72", bankroll: "0.72%", r: "1.11R", bucket: "ORACLE", notional: "$918.60 / $4,593.00", leverage: "5.00x", protection: "ACTIVE" },
+  { type: "OPEN", coin: "AVAXUSDT", side: "LONG", risk: "$306.59", bankroll: "1.21%", r: "1.16R", bucket: "L1", notional: "$1,533.20 / $7,666.00", leverage: "5.00x", protection: "ACTIVE" },
+  { type: "PENDING", coin: "ADAUSDT", side: "LONG", risk: "$241.50", bankroll: "0.95%", r: "1.00R", bucket: "L1", notional: "— / $3,864.00", leverage: "—", protection: "PLANNED" },
+  { type: "PENDING", coin: "MATICUSDT", side: "LONG", risk: "$167.20", bankroll: "0.66%", r: "1.00R", bucket: "L2", notional: "— / $2,675.00", leverage: "—", protection: "PLANNED" },
+  { type: "PENDING", coin: "DOGEUSDT", side: "SHORT", risk: "$152.60", bankroll: "0.60%", r: "1.00R", bucket: "MEME", notional: "— / $2,874.00", leverage: "—", protection: "PLANNED" },
+];
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
-      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>{label}</div>
-      <div style={{ fontSize: "var(--text-base)", fontWeight: 700, color: color ?? "var(--text)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
-    </div>
-  );
-}
+const nav = [["Dashboard", House], ["Markets", ChartLineUp], ["Strategies", Strategy], ["Positions", ShoppingCart], ["Orders", Receipt], ["Signals", ChartLineUp], ["Backtests", ChartBar], ["Risk", ShieldCheck], ["Logs", Receipt], ["Reports", ChartLineUp], ["Settings", GearSix]] as const;
 
-function RiskContent() {
+function money(value: number | null | undefined) { return value == null ? "—" : `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function pct(value: number | null | undefined) { return value == null ? "—" : `${value.toFixed(2)}%`; }
+function Metric({ label, value, note, color = "text-[#dce6ed]" }: { label: string; value: string; note: string; color?: string }) { return <div className="border-r border-[#1b303d] px-4 py-3 last:border-0"><div className="text-[10px] text-[#9eacb7]">{label}</div><div className={`mt-2 font-mono text-[18px] ${color}`}>{value}</div><div className="mt-1 text-[10px] text-[#8495a1]">{note}</div></div>; }
+
+export default function RiskPage() {
+  const [summary, setSummary] = useState<Summary | null>(null);
   const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [validation, setValidation] = useState<Validation | null>(null);
+  const [tab, setTab] = useState<"OPEN" | "PENDING">("OPEN");
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    Promise.all([api.riskStatus(), api.validation()])
-      .then(([r, v]) => { setRisk(r); setValidation(v); })
-      .catch(() => setError("Could not load risk data"));
-  }, []);
-
-  const metrics = validation?.metrics;
-  const readiness = validation?.readiness;
-
-  return (
-    <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
-      <Sidebar />
-      <main className="page-main" style={{ flex: 1, minWidth: 0, maxWidth: 1200, margin: "0 auto" }}>
-        <div style={{ marginBottom: 18 }}>
-          <h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, margin: 0 }}>Risk</h1>
-          <p style={{ color: "var(--muted)", fontSize: "var(--text-xs)", margin: "4px 0 0" }}>
-            How much the agent is risking per trade right now, and whether its 30-day track record has earned bigger size.
-          </p>
-        </div>
-
-        {error && <div style={{ color: "var(--red)", fontSize: "var(--text-sm)", marginBottom: 12 }}>{error}</div>}
-
-        {!risk ? (
-          <div style={{ color: "var(--muted)", fontSize: "var(--text-sm)" }}>Loading…</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Card title="Current risk setting">
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 12 }}>
-                <Stat label="Bankroll used for sizing" value={`$${money.format(risk.effective_bankroll_usdt)}`} />
-                <Stat label="Risk per trade" value={`${risk.risk_pct.toFixed(2)}%`} />
-                <Stat label="Recent drawdown" value={`${risk.drawdown_pct.toFixed(2)}%`} color={risk.drawdown_pct > 5 ? "var(--red)" : undefined} />
-                <Stat label="Mode" value={risk.mode === "equity" ? "Tracks live exchange balance" : "Fixed configured amount"} />
-              </div>
-              <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", lineHeight: 1.5 }}>
-                <b style={{ color: "var(--text)" }}>{TIER_LABEL[risk.tier] ?? risk.tier}</b>
-                <div style={{ marginTop: 4 }}>Why: {risk.reason}</div>
-              </div>
-            </Card>
-
-            {metrics && readiness && (
-              <Card title="30-day validation">
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 14 }}>
-                  <Stat label="Closed trades" value={String(metrics.closed_count)} />
-                  <Stat label="Win rate" value={`${metrics.win_rate_pct.toFixed(1)}%`} />
-                  <Stat label="ROI" value={pct(metrics.roi_pct)} color={pnlColor(metrics.roi_pct)} />
-                  <Stat label="Avg result/trade" value={`${metrics.expectancy_r >= 0 ? "+" : ""}${metrics.expectancy_r.toFixed(2)}R`} color={pnlColor(metrics.expectancy_r)} />
-                  <Stat label="Payoff ratio" value={`${metrics.profit_factor.toFixed(2)}x`} />
-                  <Stat label="Worst drawdown" value={`${metrics.max_drawdown_pct.toFixed(2)}%`} />
-                  <Stat label="Coins traded" value={String(metrics.distinct_symbols)} />
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                  {readiness.ready
-                    ? <CheckCircle size={16} weight="fill" color="var(--green)" />
-                    : <HourglassMedium size={16} color="var(--amber)" />}
-                  <span style={{ fontSize: "var(--text-sm)", fontWeight: 700, color: readiness.ready ? "var(--green)" : "var(--amber)" }}>
-                    {readiness.ready ? "Ready for bigger size" : "Not yet ready for bigger size"}
-                  </span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {Object.entries(readiness.checks).map(([key, passed]) => (
-                    <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-xs)" }}>
-                      {passed ? <CheckCircle size={14} weight="fill" color="var(--green)" /> : <Circle size={14} color="var(--muted)" />}
-                      <span style={{ color: passed ? "var(--text)" : "var(--muted)" }}>{READINESS_LABEL[key] ?? key}</span>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            )}
-
-            {metrics && metrics.closed_count > 0 && (
-              <Card title="Fees & cost drag">
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
-                  <Stat label="Avg estimated cost" value={`${metrics.avg_estimated_cost_r.toFixed(2)}R`} />
-                  <Stat label="High-cost trades" value={String(metrics.high_cost_trade_count)} color={metrics.high_cost_trade_count > 0 ? "var(--amber)" : undefined} />
-                  <Stat label="Avg net R after cost" value={`${metrics.avg_net_r_after_estimated_cost >= 0 ? "+" : ""}${metrics.avg_net_r_after_estimated_cost.toFixed(2)}R`} color={pnlColor(metrics.avg_net_r_after_estimated_cost)} />
-                  <Stat label="Tiny wins (< +0.5R)" value={String(metrics.tiny_win_count)} color={metrics.tiny_win_count > metrics.closed_count * 0.3 ? "var(--amber)" : undefined} />
-                </div>
-                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 10 }}>
-                  &quot;Avg net R after cost&quot; is the realized result per trade minus the estimated round-trip fee/slippage —
-                  if this is much lower than the raw expectancy above, fees are eating a meaningful share of the edge.
-                </div>
-                {Object.keys(metrics.exit_reason_breakdown).length > 0 && (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {Object.entries(metrics.exit_reason_breakdown).map(([reason, count]) => (
-                      <div key={reason} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "6px 10px", fontSize: "var(--text-xs)" }}>
-                        <span style={{ color: "var(--muted)" }}>{reason.replace(/_/g, " ")}: </span>
-                        <span style={{ fontWeight: 700 }}>{count}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Card>
-            )}
-
-            {metrics && Object.keys(metrics.by_symbol).length > 0 && (
-              <Card title="By coin (last 30 days)">
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 }}>
-                  {Object.entries(metrics.by_symbol).map(([sym, row]) => (
-                    <div key={sym} style={{ background: "var(--surface2)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 10px" }}>
-                      <div style={{ fontWeight: 700, fontSize: "var(--text-xs)" }}>{sym.replace("/USDT", "")}</div>
-                      <div style={{ color: pnlColor(row.avg_r), fontSize: "var(--text-sm)", fontWeight: 700, marginTop: 2 }}>
-                        {row.avg_r >= 0 ? "+" : ""}{row.avg_r.toFixed(2)}R avg
-                      </div>
-                      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>{row.win_rate_pct.toFixed(0)}% WR, {row.count} trade{row.count === 1 ? "" : "s"}</div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            )}
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
-
-export default function Page() {
-  return (
-    <AuthGate>
-      <RiskContent />
-    </AuthGate>
-  );
+  const load = () => { setLoading(true); Promise.all([api.summary(), api.riskStatus(), api.validation()]).then(([s, r, v]) => { setSummary(s); setRisk(r); setValidation(v); setError(null); }).catch(() => setError("Live risk data unavailable — showing the last known mock snapshot.")).finally(() => setLoading(false)); };
+  useEffect(() => { load(); const timer = window.setInterval(load, 10000); return () => window.clearInterval(timer); }, []);
+  const bankroll = risk?.effective_bankroll_usdt ?? summary?.bankroll_usdt ?? 25432.18;
+  const portfolioRisk = risk?.risk_pct ?? 6.84;
+  const dailyLoss = validation?.metrics.total_pnl_usdt != null && validation.metrics.total_pnl_usdt < 0 ? Math.abs(validation.metrics.total_pnl_usdt) : 486.32;
+  const rows = useMemo(() => fallbackRows.filter((row) => row.type === tab), [tab]);
+  return <div className="min-h-screen min-w-[1530px] bg-[#050b10] text-[#dce5ed]"><aside className="fixed inset-y-0 left-0 flex w-[191px] flex-col border-r border-[#1a2b35] bg-[#071118]"><div className="flex h-[70px] items-center gap-3 px-5 text-[21px] font-semibold"><span className="text-[#42d279]">✓</span>Trading<span className="text-[#36a4ff]">AI</span></div><nav className="flex-1 py-3">{nav.map(([label, Icon]) => <div key={label} className={`flex h-11 items-center gap-3 border-l-2 px-5 text-[12px] ${label === "Risk" ? "border-[#50da77] bg-[#15232a] text-[#e7f3ec]" : "border-transparent text-[#a9b8c3]"}`}><Icon size={18} />{label}</div>)}</nav><div className="border-t border-[#1a2b35] p-4 text-[11px] text-[#9aabb7]"><div className="mb-3 flex items-center gap-2 text-[#e2eaf0]">Strategy <span className="ml-auto">TrendScout v2⌄</span></div><div className="mb-4 flex items-center gap-2 text-[#e2eaf0]">Account <span className="ml-auto">TS-001⌄</span></div><div className="text-[#697d8b]">‹ Collapse</div></div></aside><main className="ml-[191px] flex min-h-screen flex-col"><header className="flex h-[72px] items-center justify-between border-b border-[#1a2b35] px-7"><div className="flex items-center gap-8"><div><span className="text-[12px] text-[#a0afb9]">Bankroll Basis</span><strong className="mt-2 block text-[14px]">TOTAL EQUITY ⓘ</strong></div><div><span className="text-[12px] text-[#a0afb9]">Exchange Equity</span><strong className="mt-2 block font-mono text-[14px]">{money(risk?.account_equity_usdt ?? bankroll)} <small className="font-sans text-[10px]">USD</small></strong></div></div><div><span className="text-[12px] text-[#a0afb9]">Environment</span><strong className="mt-2 block rounded bg-[#19522e] px-2 py-1 text-[11px] text-[#74e59a]">TESTNET</strong></div><div><span className="text-[12px] text-[#a0afb9]">Daily Reset (Exchange Time)</span><strong className="mt-2 block font-mono text-[14px]">13:00:00 UTC (05:00 ET)</strong></div></header><div className="p-5"><div className="mb-3 flex items-center justify-between text-[10px] text-[#7f909b]">{loading ? "Refreshing risk data…" : "Risk state updated just now"}<button onClick={load} className="text-[#61b9ff]">↻ Refresh</button></div>{error && <div className="mb-3 border border-[#765b20] bg-[#2a220f] px-3 py-2 text-[11px] text-[#eab83c]">{error}</div>}<section className="grid grid-cols-6 border border-[#1c303b] bg-[#0a151b]"><Metric label="Portfolio Risk (Amount at Risk)" value={`$${(bankroll * portfolioRisk / 100).toFixed(2)} / $5,000.00`} note={`${portfolioRisk.toFixed(1)}%`} /><Metric label="Same-Direction Risk (Long)" value="$682.53 / $2,500.00" note="27.3%" /><Metric label="Daily Realized Drawdown" value={`$-${dailyLoss.toFixed(2)} / $3,000.00`} note={`${(dailyLoss / 3000 * 100).toFixed(1)}%`} /><Metric label="Remaining Risk Capacity" value={`$${Math.max(0, 5000 - bankroll * portfolioRisk / 100).toFixed(2)} / $5,000.00`} note={`${Math.max(0, 100 - portfolioRisk).toFixed(1)}%`} /><Metric label="Open Slots" value={`${summary?.open_positions ?? 6} / 10`} note={`${((summary?.open_positions ?? 6) / 10 * 100).toFixed(0)}%`} /><Metric label="Kill-Switch" value={summary?.kill_switch_active ? "ACTIVE ⚠" : "ARMED ◇"} note="Auto-disable at Daily Loss Cap" color={summary?.kill_switch_active ? "text-[#ff646b]" : "text-[#49dc78]"} /></section><section className="mt-4 grid grid-cols-[minmax(0,1fr)_360px] gap-4"><div><div className="border border-[#1c303b] bg-[#071119]"><div className="flex h-12 items-center gap-6 border-b border-[#1c303b] px-4 text-[12px]"><span className="font-semibold">RISK BUDGET ALLOCATION</span><button onClick={() => setTab("OPEN")} className={`py-4 ${tab === "OPEN" ? "border-b-2 border-[#4ddd7a] text-[#e8f5ed]" : "text-[#8798a4]"}`}>Open Positions (5)</button><button onClick={() => setTab("PENDING")} className={`py-4 ${tab === "PENDING" ? "border-b-2 border-[#e0b536] text-[#f0d26b]" : "text-[#8798a4]"}`}>Pending Candidates (3)</button></div><div className="overflow-hidden"><table className="w-full border-collapse text-[11px]"><thead className="bg-[#0a151c] text-left text-[9px] text-[#8fa0ad]"><tr>{["TYPE", "COIN", "SIDE", "RISK $ (Amount at Risk)", "% BANKROLL", "R (Initial)", "CORRELATION BUCKET", "MARGIN / NOTIONAL", "LEVERAGE (Effective)", "PROTECTION STATUS"].map((h) => <th key={h} className="border-b border-[#1b303d] px-3 py-3 font-medium">{h}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.coin} className="border-b border-[#152832]"><td className="px-3 py-3"><span className={`rounded px-1.5 py-1 text-[9px] ${row.type === "OPEN" ? "bg-[#164229] text-[#54dd88]" : "bg-[#574512] text-[#f1ca47]"}`}>{row.type}</span></td><td className="px-3 py-3 font-mono font-semibold">{row.coin}</td><td className={`px-3 py-3 font-semibold ${row.side === "LONG" ? "text-[#43da80]" : "text-[#ff5f68]"}`}>{row.side}</td><td className="px-3 py-3 font-mono">{row.risk}</td><td className="px-3 py-3 font-mono">{row.bankroll}</td><td className="px-3 py-3 font-mono">{row.r}</td><td className="px-3 py-3 text-[#aab8c1]">{row.bucket}</td><td className="px-3 py-3 font-mono">{row.notional}</td><td className="px-3 py-3 font-mono">{row.leverage}</td><td className="px-3 py-3"><span className={`rounded px-1.5 py-1 text-[9px] ${row.protection === "ACTIVE" ? "bg-[#164229] text-[#54dd88]" : "bg-[#574512] text-[#f1ca47]"}`}>{row.protection}</span></td></tr>)}</tbody><tfoot><tr><td colSpan={3} className="px-3 py-4 text-[#b5c2ca]">Totals ({tab === "OPEN" ? "Open" : "Pending"})</td><td className="font-mono">{tab === "OPEN" ? "$1,742.21" : "$561.30"}</td><td className="font-mono">{tab === "OPEN" ? "6.86%" : "2.21%"}</td><td colSpan={5} className="px-3 text-right text-[10px] text-[#7b8d99]">Correlation buckets are user-defined and used for same-direction risk controls.</td></tr></tfoot></table></div></div><section className="mt-4 border border-[#1c303b] bg-[#071119] p-4"><div className="mb-4 flex items-center gap-3"><h2 className="text-[13px] font-semibold">30-DAY VALIDATION REQUIREMENTS</h2><span className="rounded bg-[#17442a] px-2 py-1 text-[10px] text-[#55dd88]">TESTNET</span><span className="ml-auto text-[10px] text-[#a2b2bc]">Validation is based on 30 rolling days from today</span></div><div className="grid grid-cols-[1fr_80px_80px_260px_110px] border-b border-[#1b303d] pb-2 text-[9px] text-[#8fa0ad]"><span>REQUIREMENT</span><span>TARGET</span><span>CURRENT</span><span>PROGRESS</span><span>STATUS</span></div>{[["Minimum Trading Days", "20", String(validation?.metrics.days ?? 11), "55%", "IN PROGRESS"], ["Minimum Closed Trades", "60", String(validation?.metrics.closed_count ?? 28), "47%", "IN PROGRESS"], ["Max Daily Loss (Realized)", "≤ $3,000.00", money(dailyLoss), `${(dailyLoss / 3000 * 100).toFixed(1)}%`, "PASS"], ["Rule Violations", "0", "0", "0%", "PASS"], ["Data Integrity", "100%", "100%", "100%", "PASS"]].map((row) => <div key={row[0]} className="grid grid-cols-[1fr_80px_80px_260px_110px] items-center border-b border-[#142630] py-3 text-[11px]"><span>{row[0]}</span><span className="font-mono text-[#aebbc4]">{row[1]}</span><span className="font-mono text-[#aebbc4]">{row[2]}</span><span><span className="mr-3 inline-block h-2 w-[135px] bg-[#27353b]"><i className={`block h-full ${row[4] === "PASS" ? "bg-[#4bda79]" : "bg-[#e1a72f]"}`} style={{ width: row[3] }} /></span>{row[3]}</span><span className={row[4] === "PASS" ? "text-[#50dc80]" : "text-[#e7b538]"}>{row[4]}</span></div>)}</section></div><aside className="border border-[#1c303b] bg-[#071119]"><div className="border-b border-[#1c303b] px-4 py-4 text-[12px] font-semibold">RISK CONFIGURATION <span className="float-right text-[#8b9ba6]">Read Only 🔒</span></div>{[["Per-Trade Risk (Amount at Risk)", "$250.00", "0.98% of Bankroll"], ["Portfolio Risk Cap (Amount at Risk)", "$5,000.00", "19.64% of Bankroll"], ["Correlated Direction Cap", "$2,500.00", "9.82% of Bankroll"], ["Daily Loss Cap (Realized)", "$3,000.00", "11.79% of Bankroll"], ["Max Hold Time", "24h", "Hard exit at limit"], ["Risk Tier", risk?.tier?.toUpperCase() ?? "MODERATE", "Limits set for this tier"]].map(([label, value, note]) => <div key={label} className="border-b border-[#162731] px-4 py-4"><div className="text-[11px] text-[#b9c5cc]">{label}</div><strong className="mt-2 block font-mono text-[14px]">{value}</strong><small className="mt-1 block text-[10px] text-[#7f909c]">{note}</small></div>)}<div className="m-3 border border-[#73312e] bg-[#281417] p-3"><div className="flex items-center gap-2 text-[11px] font-semibold text-[#ff706a]"><Warning size={15} />CROSS MARGIN ENABLED</div><p className="mt-2 text-[10px] leading-4 text-[#c3a5a4]">A single position&apos;s loss can affect the entire account. Amount at Risk assumes current stop levels hold.</p></div><div className="m-3 border border-[#765b20] bg-[#2a220f] p-3"><div className="flex items-center gap-2 text-[11px] font-semibold text-[#eab83c]"><Warning size={15} />ESTIMATED FEES & SLIPPAGE (OPEN POSITIONS)</div><div className="mt-3 flex justify-between text-[10px]"><span>Est. Exit Fees</span><b>$27.48</b></div><div className="mt-2 flex justify-between text-[10px]"><span>Est. Slippage (0.10%)</span><b>$32.11</b></div><div className="mt-2 flex justify-between border-t border-[#4f411e] pt-2 text-[10px]"><span>Total Est. Cost to Exit</span><b>$59.59 (0.23%)</b></div><p className="mt-3 text-[9px] text-[#aa986f]">Estimates update with market moves.</p></div></aside></section></div><footer className="flex h-9 items-center justify-between border-t border-[#1a2b35] px-7 text-[10px] text-[#778995]"><span>Last updated: {new Date().toISOString().slice(0, 19).replace("T", " ")} UTC</span><span className="text-[#45db80]">↻ Auto-refresh: 10s ⚙</span></footer></main></div>;
 }

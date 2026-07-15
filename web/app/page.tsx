@@ -1,579 +1,284 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
-import { Play, Prohibit, ArrowSquareOut, WarningCircle } from "@phosphor-icons/react";
-import { AgentStatus, api, CandlePayload, LivePosition, OpenPositionDetail, Summary, Trade } from "@/lib/api";
-import { money, pct, pnlColor, price4 } from "@/lib/format";
-import AuthGate from "./components/AuthGate";
-import Sidebar from "./components/Sidebar";
-import CoinLogo from "./components/CoinLogo";
-import { Card, Badge, Button, StatCard } from "./components/ui";
+import { useEffect, useState } from "react";
+import { api, AgentStatus, Summary } from "@/lib/api";
+import {
+  BookOpen,
+  Broadcast,
+  ChartLineUp,
+  Eye,
+  Gauge,
+  GearSix,
+  ShieldWarning,
+} from "@phosphor-icons/react";
 
-// TradingView chart link for a symbol, opened in a new tab from the coin logo/name.
-function tradingViewUrl(symbol: string) {
-  const base = symbol.split("/")[0].toUpperCase();
-  return `https://www.tradingview.com/chart/?symbol=BINANCE%3A${base}USDT.P`;
+type NavItem = { label: string; icon: typeof Gauge };
+
+const navItems: NavItem[] = [
+  { label: "Dashboard", icon: Gauge },
+  { label: "Live Log", icon: Broadcast },
+  { label: "Journal", icon: BookOpen },
+  { label: "Coin Watch", icon: Eye },
+  { label: "Risk", icon: ShieldWarning },
+  { label: "Strategy", icon: ChartLineUp },
+  { label: "Settings", icon: GearSix },
+];
+
+const metrics = [
+  ["EQUITY", "$102,846.21", "100.00%", "neutral"],
+  ["DAY P&L", "+$2,341.76", "+2.34%", "profit"],
+  ["UNREALIZED P&L", "+$1,128.35", "+1.10%", "profit"],
+  ["REALIZED P&L (7D)", "+$4,786.21", "+4.87%", "profit"],
+  ["TOTAL P&L (7D)", "+$5,914.56", "+6.04%", "profit"],
+  ["BUYING POWER", "$72,341.88", "70.3%", "neutral"],
+  ["MARGIN USED", "$30,504.33", "29.7%", "neutral"],
+  ["WIN RATE (7D)", "68.4%", "13W / 6L", "neutral"],
+  ["PROFIT FACTOR (7D)", "2.31", "2.31", "neutral"],
+] as const;
+
+const positions = [
+  {
+    coin: "BTC/USDT",
+    symbol: "BTC",
+    side: "LONG",
+    strategy: "Trend Following",
+    strategyLine: "Breakout",
+    duration: "2h 17m",
+    pnl: "+$742.18",
+    pnlPct: "+1.28%",
+    risk: "$1,800.00",
+    riskR: "1.43R",
+    entry: "67,842.50",
+    current: "68,790.30",
+    sl: "66,250.00",
+    tp: "71,800.00",
+    confidence: "0.71",
+    ev: "+1.62R",
+    thesis: "Breakout above 4H range high with strong volume & bullish structure.",
+    invalidation: "4H close below 66,250.",
+    currentPct: 28,
+  },
+  {
+    coin: "ETH/USDT",
+    symbol: "ETH",
+    side: "SHORT",
+    strategy: "Mean Reversion",
+    strategyLine: "Pullback",
+    duration: "1h 05m",
+    pnl: "+$386.17",
+    pnlPct: "+0.98%",
+    risk: "$1,200.00",
+    riskR: "1.02R",
+    entry: "3,612.40",
+    current: "3,547.65",
+    sl: "3,670.00",
+    tp: "3,410.00",
+    confidence: "0.64",
+    ev: "+1.28R",
+    thesis: "Rejection from daily supply zone with bearish divergence on RSI.",
+    invalidation: "4H close above 3,670.",
+    currentPct: 28,
+  },
+];
+
+const recentTrades = [
+  ["12:17 UTC", "SOL/USDT", "LONG", "Momentum Continuation", "3h 42m", "+$1,152.34", "+2.31R", "Take Profit (TP1)", "profit"],
+  ["11:03 UTC", "ARB/USDT", "LONG", "Breakout Retest", "1h 28m", "+$624.18", "+1.56R", "Take Profit (TP)", "profit"],
+  ["09:41 UTC", "BTC/USDT", "SHORT", "Mean Reversion", "2h 11m", "+$842.21", "+1.68R", "Stop Loss", "profit"],
+  ["08:22 UTC", "ETH/USDT", "LONG", "Trend Following", "5h 03m", "+$1,315.42", "+2.19R", "Take Profit (TP2)", "profit"],
+  ["07:18 UTC", "MATIC/USDT", "SHORT", "Fade Strength", "1h 02m", "-$243.11", "-0.81R", "Manual Exit", "loss"],
+] as const;
+
+const decisionQueue = [
+  ["12:30 UTC", "★", "AVAX/USDT", "LONG", "Breakout", "0.72", "+1.41R", "CANDIDATE", "4H range breakout, volume expanding.", "candidate"],
+  ["12:29 UTC", "⌂", "LINK/USDT", "LONG", "Trend Continuation", "0.58", "+0.74R", "BLOCKED", "Daily loss limit 80% used.", "blocked"],
+  ["12:27 UTC", "◉", "OP/USDT", "SHORT", "Mean Reversion", "0.66", "+1.18R", "OPENED", "Short from 4H supply zone.", "opened"],
+  ["12:26 UTC", "★", "DOGE/USDT", "LONG", "Breakout Retest", "0.61", "+0.93R", "CANDIDATE", "Retest of range high as support.", "candidate"],
+  ["12:24 UTC", "⌂", "ETH/USDT", "LONG", "Breakout", "0.48", "+0.42R", "BLOCKED", "R:R < 1.0 after fees.", "blocked"],
+] as const;
+
+function CoinMark({ symbol }: { symbol: string }) {
+  const colors: Record<string, string> = { BTC: "#f7931a", ETH: "#627eea", SOL: "#6d5cff", ARB: "#28a0f0", MATIC: "#8247e5" };
+  return <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white" style={{ background: colors[symbol] ?? "#64748b" }}>{symbol === "BTC" ? "₿" : symbol === "ETH" ? "◆" : symbol.slice(0, 1)}</span>;
 }
 
-const REGIME_META: Record<string, { label: string; color: string }> = {
-  extreme_fear:  { label: "Extreme Fear",    color: "var(--red)"   },
-  extreme_greed: { label: "Extreme Greed",   color: "var(--amber)" },
-  crowded_long:  { label: "Crowded Longs",   color: "var(--amber)" },
-  crowded_short: { label: "Crowded Shorts",  color: "var(--amber)" },
-  risk_off:      { label: "Risk Off",        color: "var(--red)"   },
-  normal:        { label: "Normal",          color: "var(--green)" },
-};
-
-// Plain-language labels for raw strategy/regime codes still sent as short tags.
-const STRATEGY_LABEL: Record<string, string> = {
-  trend_following: "Trend-following",
-  mean_reversion: "Bounce (mean-reversion)",
-  volatility_filter: "Standing aside",
-};
-const TRADE_REGIME_LABEL: Record<string, string> = {
-  trending: "Trending",
-  ranging: "Sideways",
-  high_vol: "Volatile",
-};
-function friendlyStrategy(s?: string) { return s ? (STRATEGY_LABEL[s] ?? s.replace(/_/g, " ")) : "—"; }
-function friendlyTradeRegime(r?: string) { return r ? (TRADE_REGIME_LABEL[r] ?? r.replace(/_/g, " ")) : "—"; }
-
-// Plain-English 1-2 sentence status read for an open position — trend +
-// momentum, whether structure just broke, and news, composed as prose
-// (not a tag line). Trend/momentum are always available (computed fresh
-// from candles every check); the structure sentence only appears once a
-// confirmed BOS/CHoCH has actually happened (silence until then is
-// expected — nothing broke yet, not missing data). All come from the
-// trade's indicator_snapshot, written server-side by
-// agent.orchestrator._check_structure_alert; news from the same cached
-// sentiment the confidence-adjustment path reads. `warn` is true only for a
-// CHoCH against the trade's own direction — the one case worth a color call-out.
-function positionStatusLine(snapshot: Record<string, unknown> | undefined, side: string, news?: { label: string; score: number }): { text: string; warn: boolean } | null {
-  const trend = typeof snapshot?.trend_direction === "string" ? snapshot.trend_direction as string : undefined;
-  const momentum = typeof snapshot?.momentum_state === "string" ? snapshot.momentum_state as string : undefined;
-  const bias = typeof snapshot?.structure_bias === "string" ? snapshot.structure_bias as string : undefined;
-  const breakKind = typeof snapshot?.structure_last_break_kind === "string" ? snapshot.structure_last_break_kind as string : undefined;
-  const against = breakKind === "CHoCH" && bias !== undefined && (
-    (side === "long" && bias === "bearish") || (side === "short" && bias === "bullish")
-  );
-  const hasNews = news && news.label !== "no data";
-
-  const sentences: string[] = [];
-
-  if (trend) {
-    const trendWord = trend === "bullish" ? "Bullish" : trend === "bearish" ? "Bearish" : "Trading sideways";
-    let s = `${trendWord} on the 1h`;
-    if (momentum === "cooling") s += ", but momentum is fading — could stall or pull back soon";
-    else if (momentum === "strengthening") s += ", and momentum is picking up";
-    sentences.push(s + ".");
-  }
-
-  if (bias && breakKind) {
-    const breakWord = breakKind === "CHoCH" ? "just reversed" : "confirmed the move";
-    let s = `Structure ${breakWord} — a ${breakKind} turned the swing bias ${bias}`;
-    s += against ? ", which is against this position." : ".";
-    sentences.push(s);
-  }
-
-  if (hasNews) sentences.push(`News sentiment is ${news!.label}.`);
-
-  if (sentences.length === 0) return null;
-  return { text: sentences.join(" "), warn: against };
-}
-
-function parseApiDate(value: string) {
-  const normalized = value.includes("T") ? value : value.replace(" ", "T");
-  return new Date(normalized.endsWith("Z") || normalized.includes("+") ? normalized : normalized + "Z");
-}
-
-function openDuration(openedAt: string) {
-  const opened = parseApiDate(openedAt).getTime();
-  if (!Number.isFinite(opened)) return "Open";
-  const totalMinutes = Math.max(0, Math.floor((Date.now() - opened) / 60000));
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-
-  if (days > 0) return `${days}d ${hours}h open`;
-  if (hours > 0) return `${hours}h ${minutes.toString().padStart(2, "0")}m open`;
-  return `${Math.max(1, minutes)}m open`;
-}
-
-// ── PnlBar: visual range bar for entry/SL/TP ────────────────────────────────
-function PnlBar({ trade, currentPrice, tall = false }: { trade: Pick<Trade, "entry_price" | "stop_loss" | "take_profit" | "side">; currentPrice?: number; tall?: boolean }) {
-  const { entry_price, stop_loss, take_profit, side } = trade;
-  const lo = Math.min(entry_price, stop_loss, take_profit, currentPrice ?? entry_price);
-  const hi = Math.max(entry_price, stop_loss, take_profit, currentPrice ?? entry_price);
-  const span = hi - lo || 1;
-  const pos  = (v: number) => `${((v - lo) / span) * 100}%`;
-
+function MetricStrip({ live }: { live?: Summary | null }) {
+  const liveMetrics = live ? [
+    ["EQUITY", `$${live.bankroll_usdt.toLocaleString("en-US", { minimumFractionDigits: 2 })}`, "USDT balance", "neutral"],
+    ["DAY P&L", "—", "awaiting daily series", "neutral"],
+    ["UNREALIZED P&L", "—", `${live.open_positions} open positions`, "neutral"],
+    ["REALIZED P&L (7D)", `$${live.total_pnl_usdt.toLocaleString("en-US", { minimumFractionDigits: 2, signDisplay: "always" })}`, `${live.roi_pct >= 0 ? "+" : ""}${live.roi_pct.toFixed(2)}% ROI`, live.total_pnl_usdt >= 0 ? "profit" : "loss"],
+    ["TOTAL P&L (7D)", `$${live.total_pnl_usdt.toLocaleString("en-US", { minimumFractionDigits: 2, signDisplay: "always" })}`, `${live.roi_pct >= 0 ? "+" : ""}${live.roi_pct.toFixed(2)}%`, live.total_pnl_usdt >= 0 ? "profit" : "loss"],
+    ["BUYING POWER", "—", "exchange-backed", "neutral"], ["MARGIN USED", "—", "exchange-backed", "neutral"],
+    ["WIN RATE (7D)", `${live.win_rate_pct.toFixed(1)}%`, `${live.total_trades} total trades`, "neutral"], ["PROFIT FACTOR (7D)", "—", "available in Journal", "neutral"],
+  ] as const : metrics;
   return (
-    <div style={{ position: "relative", height: tall ? 10 : 6, background: "var(--surface3)", borderRadius: 4, margin: tall ? "12px 0 14px" : "12px 0 4px" }}>
-      {/* SL zone */}
-      {side === "long" ? (
-        <div style={{ position: "absolute", left: pos(stop_loss), right: `${100 - parseFloat(pos(entry_price))}%`, height: "100%", background: "var(--red)", opacity: 0.35, borderRadius: 3 }} />
-      ) : (
-        <div style={{ position: "absolute", left: pos(entry_price), right: `${100 - parseFloat(pos(stop_loss))}%`, height: "100%", background: "var(--red)", opacity: 0.35, borderRadius: 3 }} />
-      )}
-      {/* TP zone */}
-      {side === "long" ? (
-        <div style={{ position: "absolute", left: pos(entry_price), right: `${100 - parseFloat(pos(take_profit))}%`, height: "100%", background: "var(--green)", opacity: 0.35, borderRadius: 3 }} />
-      ) : (
-        <div style={{ position: "absolute", left: pos(take_profit), right: `${100 - parseFloat(pos(entry_price))}%`, height: "100%", background: "var(--green)", opacity: 0.35, borderRadius: 3 }} />
-      )}
-      {/* Markers */}
-      {[
-        { price: stop_loss,   color: "var(--red)",   label: "SL" },
-        { price: entry_price, color: "var(--accent)", label: "E"  },
-        { price: take_profit, color: "var(--green)",  label: "TP" },
-      ].map(({ price: p, color: c, label }) => (
-        <div key={label} style={{ position: "absolute", left: pos(p), transform: "translateX(-50%)", top: -3, width: 12, height: 12, borderRadius: "50%", background: c, border: "2px solid var(--surface)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2 }} title={`${label}: ${price4.format(p)}`} />
+    <section className="grid min-w-[980px] grid-cols-9 border-b border-[#202b35] bg-[#080d12] px-4 py-5">
+      {liveMetrics.map(([label, value, sub, tone], index) => (
+        <div key={label} className={`border-r border-[#202b35] px-4 first:pl-1 last:border-r-0 ${index === 0 ? "border-t-2 border-t-[#3186ff]" : ""}`}>
+          <div className="mb-2 text-[11px] font-medium tracking-[0.01em] text-[#9aa6b3]">{label}</div>
+          <div className={`font-mono text-[17px] font-medium leading-none ${tone === "profit" ? "text-[#36d477]" : "text-[#e6edf3]"}`}>{value}</div>
+          <div className="mt-2 font-mono text-[12px] text-[#b4bec8]">{sub}</div>
+        </div>
       ))}
-      {currentPrice !== undefined && (
-        <div
-          style={{ position: "absolute", left: pos(currentPrice), transform: "translateX(-50%)", top: tall ? -6 : -5, width: tall ? 2 : 10, height: tall ? 22 : 16, borderRadius: 2, background: "var(--text)", boxShadow: "0 0 0 2px var(--surface)", zIndex: 3 }}
-          title={`Current: ${price4.format(currentPrice)}`}
-        />
-      )}
-    </div>
+    </section>
   );
 }
 
-// ── open position card ───────────────────────────────────────────────────────
-function latestClose(payload?: CandlePayload) {
-  const last = payload?.candles?.[payload.candles.length - 1];
-  return last?.close;
-}
-
-function unrealizedPct(trade: Pick<Trade, "side" | "entry_price">, currentPrice?: number) {
-  if (currentPrice === undefined || !trade.entry_price) return undefined;
-  const direction = trade.side === "long" ? 1 : -1;
-  return ((currentPrice - trade.entry_price) / trade.entry_price) * direction * 100;
-}
-
-// One canonical open-position card. `detail` (the enriched reasoning payload)
-// is optional — when it's missing (API hiccup, or this trade just isn't in
-// that response yet) the card falls back to the plain trade fields instead
-// of swapping to a structurally different layout. Same shape either way.
-function OpenPositionCard({ trade, detail, payload, live }: { trade: Trade; detail?: OpenPositionDetail; payload?: CandlePayload; live?: LivePosition }) {
-  const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
-  // Prefer the exchange's own mark price / unrealized PnL / ROI — they account
-  // for trading fees and break-even price, unlike the (close - entry) * qty
-  // approximation from 1h candles, which was drifting a few dollars off.
-  const currentPrice = live?.mark_price ?? latestClose(payload);
-  const openPct = live?.roi_pct ?? unrealizedPct(trade, currentPrice);
-  // Show every reason the agent gathered, not just the first — a single
-  // line was always the same generic regime restatement on every trade.
-  const note = detail ? detail.reasoning.thesis.join(" ") : specificReasoning(trade.entry_reasoning);
-  const snapshot = trade.indicator_snapshot as Record<string, unknown> | undefined;
-  const riskPct = typeof snapshot?.actual_risk_pct === "number" ? snapshot.actual_risk_pct : undefined;
-  const statusLine = positionStatusLine(snapshot, trade.side, detail?.news);
-
+function ExposureRiskBand() {
   return (
-    <div className="ui-card" style={{ borderColor: `color-mix(in oklab, ${sideColor} 22%, var(--border))` }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          <a
-            href={tradingViewUrl(trade.symbol)}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={`Open ${trade.symbol} chart on TradingView`}
-            style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: "inherit" }}
-          >
-            <CoinLogo symbol={trade.symbol} size={26} />
-            <div>
-              <div style={{ fontWeight: 700, fontSize: "var(--text-base)" }}>{trade.symbol}</div>
-              <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>{friendlyStrategy(trade.strategy_name)} · {friendlyTradeRegime(trade.regime)}</div>
+    <section className="grid min-w-[980px] grid-cols-[1.15fr_1.2fr_1.15fr] border-b border-[#202b35] px-4 py-4 text-[12px]">
+      <div className="border-r border-[#202b35] pr-6">
+        <h2 className="mb-4 text-[12px] font-medium text-[#c4cdd6]">EXPOSURE &amp; RISK</h2>
+        <div className="grid grid-cols-4 gap-4">
+          {[["GROSS EXPOSURE", "$60,632.18", "58.9%"], ["NET EXPOSURE", "$23,972.14", "23.3% Long"], ["MAX DAILY LOSS", "$5,000.00", "5.00%"], ["DAILY LOSS USED", "$1,092.24", "2.18%"]].map(([label, value, sub]) => (
+            <div key={label}>
+              <div className="mb-2 text-[10px] text-[#8f9aa5]">{label}</div>
+              <div className={`font-mono text-[15px] ${label === "DAILY LOSS USED" ? "text-[#36d477]" : "text-[#e6edf3]"}`}>{value}</div>
+              <div className={`mt-1 font-mono text-[11px] ${label === "DAILY LOSS USED" ? "text-[#36d477]" : "text-[#b2bcc6]"}`}>{sub}</div>
             </div>
-          </a>
-          <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
-        </div>
-        <span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
-          {openDuration(trade.opened_at)}
-        </span>
-      </div>
-
-      <div style={{ padding: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>Unrealized P&L</div>
-            <div style={{ color: openPct === undefined ? "var(--muted)" : pnlColor(openPct), fontSize: "var(--text-2xl)", fontWeight: 750, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
-              {openPct === undefined ? "n/a" : `${openPct >= 0 ? "+" : ""}${openPct.toFixed(2)}%`}
-            </div>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>Price now</div>
-            <div style={{ fontSize: "var(--text-md)", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{currentPrice === undefined ? "..." : price4.format(currentPrice)}</div>
-          </div>
-        </div>
-
-        <PnlBar trade={trade} currentPrice={currentPrice} tall />
-
-        <div
-          style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 8 }}
-          title={riskPct !== undefined ? `${riskPct.toFixed(2)}% of bankroll risked · qty ${price4.format(trade.qty)} · ${trade.leverage}× leverage` : undefined}
-        >
-          <span style={{ color: "var(--red)" }}>SL {price4.format(trade.stop_loss)}</span>
-          {" · "}
-          <span style={{ color: "var(--accent)" }}>Entry {price4.format(trade.entry_price)}</span>
-          {" · "}
-          <span style={{ color: "var(--green)" }}>TP {price4.format(trade.take_profit)}</span>
-        </div>
-
-        {statusLine && (
-          <div style={{ color: statusLine.warn ? "var(--amber)" : "var(--muted)", fontSize: "var(--text-xs)", lineHeight: 1.5, display: "flex", gap: 5, alignItems: "flex-start", marginBottom: 8 }}>
-            {statusLine.warn && <WarningCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />}
-            <span>{statusLine.text}</span>
-          </div>
-        )}
-
-        {detail?.reasoning.weakness && (
-          <div style={{ color: "var(--amber)", fontSize: "var(--text-2xs)", lineHeight: 1.4, display: "flex", gap: 4, alignItems: "flex-start", marginBottom: note ? 8 : 0 }}>
-            <WarningCircle size={13} style={{ flexShrink: 0, marginTop: 1 }} /> {detail.reasoning.weakness}
-          </div>
-        )}
-
-        {note && (
-          <details style={{ paddingTop: 8, borderTop: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
-              <span style={{ background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: "3px 8px", fontSize: "var(--text-2xs)", color: "var(--muted)" }}>
-                ⚙️ {friendlyStrategy(trade.strategy_name)}
-              </span>
-              <span style={{ background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: "3px 8px", fontSize: "var(--text-2xs)", color: "var(--muted)" }}>
-                📈 {friendlyTradeRegime(trade.regime)}
-              </span>
-            </div>
-            <summary className="reasoning-toggle" style={{ cursor: "pointer", color: "var(--accent)", fontSize: "var(--text-2xs)", fontWeight: 700, letterSpacing: "0.02em" }}>
-              View Full Trade Thesis
-            </summary>
-            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6, background: "var(--surface2)", borderRadius: "var(--radius-sm)", padding: 10 }}>
-              <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.45 }}>
-                {note}
-              </div>
-              {detail && detail.reasoning.why_accepted.length > 0 && (
-                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
-                  Why accepted: {detail.reasoning.why_accepted.join(" ")}
-                </div>
-              )}
-              {detail && (
-                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
-                  Invalidation: {detail.reasoning.invalidation}
-                </div>
-              )}
-              {detail?.reasoning.past_context && (
-                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", lineHeight: 1.4 }}>
-                  Past: {detail.reasoning.past_context}
-                </div>
-              )}
-            </div>
-          </details>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Exit reasons that are obvious from the win/loss color + amount already
-// shown — no need to spell them out. Anything else (trailing exits, manual
-// fixes, forced closes) is genuinely useful context, so it's kept.
-const OBVIOUS_EXIT_REASONS = new Set(["take_profit", "stop_loss"]);
-const EXIT_REASON_LABEL: Record<string, string> = {
-  trailing_take_profit: "Trailing stop locked in the win",
-  trailing_stop: "Trailing stop hit (had moved from entry)",
-  max_hold_timeout: "Force-closed after max hold time",
-  manual_reconcile_duplicate: "Closed manually (duplicate fix)",
-};
-function noteworthyExitReason(reason: string | null): string | null {
-  if (!reason || OBVIOUS_EXIT_REASONS.has(reason)) return null;
-  return EXIT_REASON_LABEL[reason] ?? reason.replace(/_/g, " ");
-}
-
-// Every trade's reasoning always starts with the same generic market-read
-// restatement (it's already shown as the strategy/regime badge) — pick the
-// first line that's actually specific to this trade instead, so cards don't
-// all read identically.
-function specificReasoning(lines: string[]): string {
-  return lines.find(l => !l.startsWith("Market read:")) ?? lines[0] ?? "—";
-}
-
-// ── trade card (compact, used in a responsive grid instead of full-width rows) ─
-function TradeRow({ trade }: { trade: Trade }) {
-  const pnl = trade.pnl_usdt ?? 0;
-  const sideColor = trade.side === "long" ? "var(--green)" : "var(--red)";
-  const pnlPct = trade.exit_price !== null ? unrealizedPct(trade, trade.exit_price) : undefined;
-  const footerNote = noteworthyExitReason(trade.exit_reason) ?? specificReasoning(trade.entry_reasoning);
-  return (
-    <Link
-      href={`/journal?trade=${trade.id}`}
-      className="ui-card ui-card--hoverable"
-      style={{ color: "inherit", textDecoration: "none", background: "var(--surface2)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <CoinLogo symbol={trade.symbol} size={20} />
-        <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", flex: 1, minWidth: 0 }}>{trade.symbol.replace("/USDT", "")}</span>
-        <Badge color={sideColor}>{trade.side.toUpperCase()}</Badge>
-      </div>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-          <span style={{ color: pnlColor(pnl), fontWeight: 700, fontSize: "var(--text-md)", fontVariantNumeric: "tabular-nums" }}>
-            {pnlPct !== undefined ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}%` : "—"}
-          </span>
-        </div>
-        <span style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
-          {trade.closed_at ? parseApiDate(trade.closed_at).toLocaleDateString([], { month: "short", day: "numeric" }) : "—"}
-        </span>
-      </div>
-      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {footerNote}
-      </div>
-    </Link>
-  );
-}
-
-// ── kill switch button ───────────────────────────────────────────────────────
-function KillSwitchButton({ killActive, toggling, confirming, onHalt, onConfirm, onCancel, onResume, cancelRef }: {
-  killActive?: boolean; toggling: boolean; confirming: boolean;
-  onHalt: () => void; onConfirm: () => void; onCancel: () => void; onResume: () => void;
-  cancelRef: React.RefObject<HTMLButtonElement | null>;
-}) {
-  if (confirming) return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <span style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>Confirm halt?</span>
-      <Button variant="danger" onClick={onConfirm} disabled={toggling} aria-label="Confirm halt" style={{ minHeight: 44 }}>
-        Yes, halt
-      </Button>
-      <Button ref={cancelRef} variant="secondary" onClick={onCancel} aria-label="Cancel" style={{ minHeight: 44 }}>
-        Cancel
-      </Button>
-    </div>
-  );
-
-  if (killActive) return (
-    <Button variant="danger" onClick={onResume} disabled={toggling} aria-label="Resume trading" style={{ minHeight: 44, padding: "0 18px" }}>
-      <Play size={14} weight="fill" /> {toggling ? "Resuming…" : "Resume trading"}
-    </Button>
-  );
-
-  return (
-    <Button variant="secondary" onClick={onHalt} disabled={toggling} aria-label="Halt new entries" style={{ minHeight: 44, padding: "0 18px" }}>
-      <Prohibit size={14} style={{ color: "var(--red)" }} />
-      {toggling ? "Halting…" : "Halt entries"}
-    </Button>
-  );
-}
-
-// ── main dashboard ───────────────────────────────────────────────────────────
-function Dashboard() {
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [status,  setStatus]  = useState<AgentStatus | null>(null);
-  const [trades,  setTrades]  = useState<Trade[]>([]);
-  const [positionDetails, setPositionDetails] = useState<OpenPositionDetail[]>([]);
-  const [candlePayloads, setCandlePayloads] = useState<Record<string, CandlePayload>>({});
-  const [livePositions, setLivePositions] = useState<Record<string, LivePosition>>({});
-  const [loading, setLoading] = useState(true);
-  const [toggling,      setToggling]      = useState(false);
-  const [confirmingHalt,setConfirmingHalt]= useState(false);
-  const [error,         setError]         = useState<string | null>(null);
-  const [toggleError,   setToggleError]   = useState<string | null>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
-
-  async function load() {
-    try {
-      const [s, st, t, details, live] = await Promise.all([
-        api.summary(),
-        api.agentStatus(),
-        api.trades(15),
-        api.openPositionDetails(),
-        api.livePositions().catch(() => []),
-      ]);
-      setSummary(s); setStatus(st); setTrades(t); setPositionDetails(details); setError(null);
-      const liveBySymbol: Record<string, LivePosition> = {};
-      live.forEach(p => {
-        const norm = p.symbol.includes("/") ? p.symbol : p.symbol.replace(/USDT$/, "/USDT");
-        liveBySymbol[norm] = p;
-      });
-      setLivePositions(liveBySymbol);
-      if (details.length > 0) {
-        const candles = await Promise.all(
-          details.map(d => api.candles(d.trade.symbol, "1h", 120).catch(() => null))
-        );
-        const nextPayloads: Record<string, CandlePayload> = {};
-        candles.forEach((payload, idx) => {
-          if (payload) nextPayloads[details[idx].trade.symbol] = payload;
-        });
-        setCandlePayloads(nextPayloads);
-      } else {
-        setCandlePayloads({});
-      }
-    } catch {
-      setError("Cannot reach API — retrying every 15 s");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, 15000);
-    return () => clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!confirmingHalt) return;
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setConfirmingHalt(false); }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [confirmingHalt]);
-
-  async function confirmHalt() {
-    setConfirmingHalt(false); setToggling(true); setToggleError(null);
-    try { await api.setKillSwitch(true, "manual halt"); await load(); }
-    catch { setToggleError("Halt failed — check server logs."); }
-    finally { setToggling(false); }
-  }
-
-  async function resumeTrading() {
-    setToggling(true); setToggleError(null);
-    try { await api.setKillSwitch(false, "manual resume"); await load(); }
-    catch { setToggleError("Resume failed — check server logs."); }
-    finally { setToggling(false); }
-  }
-
-  const lastChecked = useMemo(() => {
-    if (!status?.checked_at) return "—";
-    const d = parseApiDate(status.checked_at);
-    return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " +
-           d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }, [status?.checked_at]);
-
-  const openTrades   = trades.filter(t => !t.closed_at);
-  const openCount    = openTrades.length;
-  const closedTrades = trades.filter(t =>  t.closed_at);
-  const detailByTradeId = useMemo(() => {
-    const map: Record<number, OpenPositionDetail> = {};
-    positionDetails.forEach(d => { map[d.trade.id] = d; });
-    return map;
-  }, [positionDetails]);
-  const killActive   = summary?.kill_switch_active;
-  const regime       = status?.macro_regime || "normal";
-  const regimeMeta   = REGIME_META[regime] || { label: regime, color: "var(--muted)" };
-
-  return (
-    <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", display: "flex" }}>
-      <Sidebar />
-      <div style={{ flex: 1, minWidth: 0 }}>
-
-      {/* HALTED banner */}
-      {killActive && (
-        <div role="status" aria-live="polite"
-          style={{ background: "color-mix(in oklab, var(--red) 10%, transparent)", borderBottom: "1px solid color-mix(in oklab, var(--red) 30%, transparent)", color: "var(--red)", padding: "9px 24px", fontSize: "var(--text-xs)", fontWeight: 600, textAlign: "center", letterSpacing: "0.05em" }}>
-          ▐▐ TRADING HALTED — all new entries blocked
-        </div>
-      )}
-
-      <main className="page-main" style={{ maxWidth: 1560, margin: "0 auto" }}>
-
-        {/* Header row */}
-        <div className="header-row" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, margin: 0 }}>Dashboard</h1>
-              {killActive && <Badge color="var(--red)">HALTED</Badge>}
-            </div>
-            <p style={{ color: "var(--muted)", fontSize: "var(--text-xs)", margin: "4px 0 0" }}>
-              {loading ? "Connecting…" : `Updated ${lastChecked}`}
-            </p>
-          </div>
-          <KillSwitchButton
-            killActive={killActive}
-            toggling={toggling}
-            confirming={confirmingHalt}
-            onHalt={() => { setConfirmingHalt(true); setTimeout(() => cancelRef.current?.focus(), 0); }}
-            onConfirm={confirmHalt}
-            onCancel={() => setConfirmingHalt(false)}
-            onResume={resumeTrading}
-            cancelRef={cancelRef}
-          />
-        </div>
-
-        {/* Errors */}
-        {error && (
-          <div role="alert" style={{ background: "color-mix(in oklab, var(--red) 8%, transparent)", border: "1px solid color-mix(in oklab, var(--red) 30%, transparent)", color: "var(--red)", borderRadius: "var(--radius-sm)", padding: "10px 16px", fontSize: "var(--text-xs)", marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <span>{error}</span>
-            <button onClick={load} className="ui-btn ui-btn--ghost" style={{ color: "var(--red)", textDecoration: "underline" }}>Retry</button>
-          </div>
-        )}
-        {toggleError && (
-          <div role="alert" style={{ background: "color-mix(in oklab, var(--red) 8%, transparent)", border: "1px solid color-mix(in oklab, var(--red) 30%, transparent)", color: "var(--red)", borderRadius: "var(--radius-sm)", padding: "10px 16px", fontSize: "var(--text-xs)", marginBottom: 16 }}>
-            {toggleError}
-          </div>
-        )}
-
-        {/* Stat row */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 18 }}>
-          {[
-            <StatCard key="bankroll" label="Bankroll" value={summary ? `$${money.format(summary.bankroll_usdt)}` : "—"} sub="USDT balance" loading={loading} accent="var(--accent)" />,
-            <StatCard key="roi" label="ROI" value={summary ? pct(summary.roi_pct) : "—"} color={summary ? pnlColor(summary.roi_pct) : undefined} sub={summary ? `${summary.total_trades} closed trades, all-time` : "all-time"} loading={loading} accent={summary ? pnlColor(summary.roi_pct) : undefined} />,
-            <StatCard key="winrate" label="Win Rate" value={summary ? `${summary.win_rate_pct.toFixed(1)}%` : "—"} sub={summary ? `${summary.total_trades} total` : undefined} loading={loading} accent={summary ? (summary.win_rate_pct >= 50 ? "var(--green)" : "var(--amber)") : undefined} />,
-            <StatCard key="open" label="Open" value={summary ? String(summary.open_positions) : "—"} color={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} sub="positions" loading={loading} accent={summary && summary.open_positions > 0 ? "var(--amber)" : undefined} />,
-            <StatCard key="macro" label="Macro" value={regimeMeta.label} color={regime === "normal" ? undefined : regimeMeta.color} sub={`size ×${status ? (status as AgentStatus & { size_multiplier?: number }).size_multiplier?.toFixed(2) ?? "—" : "—"}`} loading={loading} accent={regime === "normal" ? "var(--border2)" : regimeMeta.color} />,
-          ].map((el, i) => (
-            <div key={el.key} className="rise-in" style={{ animationDelay: `${i * 40}ms` }}>{el}</div>
           ))}
         </div>
-
-        {/* Open positions */}
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <h2 style={{ fontSize: "var(--text-xs)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)", margin: 0 }}>Open Positions</h2>
-            {openCount > 0 && <Badge color="var(--amber)">{openCount}</Badge>}
-          </div>
-          {openTrades.length > 0 ? (
-            <div className="open-position-list" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 10 }}>
-              {openTrades.map(t => (
-                <OpenPositionCard
-                  key={t.id}
-                  trade={t}
-                  detail={detailByTradeId[t.id]}
-                  payload={candlePayloads[t.symbol]}
-                  live={livePositions[t.symbol]}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="ui-card" style={{ minHeight: 90, padding: 16, color: "var(--muted)", fontSize: "var(--text-sm)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-              {loading ? "Loading positions..." : "No open position right now — the agent is scanning every active coin and will open one once a good setup shows up."}
-            </div>
-          )}
-        </div>
-
-        {/* Recent closed trades */}
-        <Card title="Recent Closed Trades" right={<Link href="/journal" style={{ color: "var(--accent)", fontSize: "var(--text-2xs)", textDecoration: "none", display: "flex", alignItems: "center", gap: 3 }}>View all <ArrowSquareOut size={11} /></Link>} noPad>
-          <div style={{ padding: "12px 20px 16px" }}>
-            {loading ? (
-              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: "var(--text-sm)" }}>Loading…</div>
-            ) : closedTrades.length > 0 ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
-                {closedTrades.map(t => <TradeRow key={t.id} trade={t} />)}
-              </div>
-            ) : (
-              <div style={{ padding: "32px 0", textAlign: "center", color: "var(--muted)", fontSize: "var(--text-sm)" }}>No closed trades yet</div>
-            )}
-          </div>
-        </Card>
-
-      </main>
       </div>
+      <div className="border-r border-[#202b35] px-6">
+        <h2 className="mb-4 text-[12px] font-medium text-[#c4cdd6]">EXPOSURE BY COIN (ΔI)</h2>
+        <div className="flex items-end gap-4">
+          {[['BTC', '31.2%', 100], ['ETH', '17.6%', 58], ['SOL', '6.9%', 24], ['ARB', '3.2%', 12], ['OTH', '5.0%', 18]].map(([coin, value, width]) => (
+            <div key={String(coin)} className="min-w-0 flex-1">
+              <div className="mb-2 text-[12px] text-[#d7dee5]">{coin}</div>
+              <div className="font-mono text-[14px] text-[#e6edf3]">{value}</div>
+              <div className="mt-3 h-1 rounded-sm bg-[#1b2935]"><div className="h-full rounded-sm bg-[#2e8bff]" style={{ width: `${Number(width)}%` }} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="pl-6">
+        <h2 className="mb-4 text-[12px] font-medium text-[#c4cdd6]">RISK METRICS</h2>
+        <div className="grid grid-cols-5 gap-4">
+          {[['PORTFOLIO VaR (95%)', '$2,898.74', '2.82%'], ['EXPECTED SHORTFALL', '$4,451.20', '4.33%'], ['SHARPE (7D)', '1.42', ''], ['MAX DRAWDOWN (7D)', '3.71%', ''], ['LEVERAGE', '1.98x', 'EFF. 1.37x']].map(([label, value, sub]) => (
+            <div key={String(label)}>
+              <div className="mb-2 whitespace-nowrap text-[10px] text-[#8f9aa5]">{label}</div>
+              <div className={`font-mono text-[15px] ${label === 'MAX DRAWDOWN (7D)' ? 'text-[#ff4d54]' : 'text-[#e6edf3]'}`}>{value}</div>
+              <div className="mt-1 font-mono text-[11px] text-[#b2bcc6]">{sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PriceTrack({ position }: { position: (typeof positions)[number] }) {
+  return (
+    <div className="relative mt-2 h-5 min-w-[230px]">
+      <div className="absolute left-0 right-0 top-[9px] h-px bg-[#60717e]" />
+      <div className="absolute left-0 top-[7px] h-[5px] w-[18%] bg-[#c94a54]" />
+      <div className="absolute left-[18%] top-[7px] h-[5px] w-[62%] bg-[#286f51]" />
+      <div className="absolute left-[18%] top-0 h-5 w-px bg-[#e4ebef]" />
+      <div className="absolute left-[28%] top-[5px] h-2 w-2 -translate-x-1/2 rounded-full bg-[#e4ebef]" />
+      <div className="absolute left-[65%] top-[5px] h-2 w-2 -translate-x-1/2 rounded-full bg-[#2e8bff]" />
+      <div className="absolute left-[90%] top-[5px] h-2 w-2 -translate-x-1/2 rounded-full bg-[#36d477]" />
+      <div className="absolute left-0 top-0 h-2 w-2 -translate-x-1/2 rounded-full bg-[#ff4d54]" />
+      <div className="absolute right-0 top-0 h-2 w-2 translate-x-1/2 rounded-full bg-[#36d477]" />
     </div>
+  );
+}
+
+function OpenPositions() {
+  return (
+    <section className="min-w-[1120px] border-b border-[#202b35]">
+      <div className="flex items-center justify-between border-b border-[#202b35] px-4 py-3">
+        <h2 className="text-[12px] font-medium text-[#d1d9e0]">OPEN POSITIONS (2)</h2>
+        <button className="text-[12px] text-[#c5cdd4]">Sort: At Risk <span className="ml-2">⌄</span></button>
+      </div>
+      <div className="grid grid-cols-[1.15fr_.6fr_1.1fr_.75fr_1fr_.9fr_1.2fr_1.2fr_1.2fr_1.15fr_.7fr_2fr] gap-3 border-b border-[#202b35] px-4 py-3 text-[10px] text-[#8d9aa5]">
+        {['PAIR', 'SIDE', 'STRATEGY', 'DURATION', 'UNREALIZED P&L', 'RISK', 'ENTRY', 'CURRENT', 'SL', 'TP', 'CONFIDENCE', 'EXP. VALUE / THESIS'].map(label => <span key={label}>{label}</span>)}
+      </div>
+      {positions.map(position => (
+        <div key={position.coin} className="grid grid-cols-[1.15fr_.6fr_1.1fr_.75fr_1fr_.9fr_1.2fr_1.2fr_1.2fr_1.15fr_.7fr_2fr] items-center gap-3 border-b border-[#202b35] px-4 py-4 text-[12px] last:border-b-0">
+          <div className="flex items-center gap-2"><CoinMark symbol={position.symbol} /><div><div className="text-[12px] text-[#e6edf3]">{position.coin}</div><div className="mt-1 text-[11px] text-[#8996a2]">Perp</div></div></div>
+          <div className={position.side === 'LONG' ? 'text-[#36d477]' : 'text-[#ff4d54]'}>{position.side}</div>
+          <div className="leading-tight text-[#d9e1e8]"><div>{position.strategy}</div><div>{position.strategyLine}</div></div>
+          <div className="font-mono text-[#d2dae1]">{position.duration}</div>
+          <div className="font-mono text-[#36d477]"><div>{position.pnl}</div><div className="mt-1 text-[11px]">{position.pnlPct}</div></div>
+          <div className="font-mono text-[#dce4ea]"><div>{position.risk}</div><div className="mt-1 text-[11px] text-[#36d477]">{position.riskR}</div></div>
+          <div className="font-mono text-[#dce4ea]">{position.entry}</div>
+          <div className="font-mono text-[#dce4ea]">{position.current}</div>
+          <div className="font-mono text-[#dce4ea]">{position.sl}</div>
+          <div className="font-mono text-[#dce4ea]"><PriceTrack position={position} /><span className="sr-only">Take profit {position.tp}</span></div>
+          <div className="font-mono text-[#dce4ea]">{position.confidence}</div>
+          <div className="leading-tight"><div className="font-mono text-[#36d477]">{position.ev}</div><p className="mt-2 max-w-[260px] text-[12px] leading-[1.35] text-[#dce4ea]">{position.thesis}</p><p className="mt-1 text-[12px] leading-[1.35] text-[#ff4d54]">Invalidation: {position.invalidation}</p></div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function RecentTrades() {
+  return (
+    <section className="min-w-[620px] border-r border-[#202b35]">
+      <div className="flex items-center justify-between border-b border-[#202b35] px-4 py-3"><h2 className="text-[12px] font-medium text-[#d1d9e0]">RECENT CLOSED TRADES</h2><a className="text-[12px] text-[#3b8cff]">View all ↗</a></div>
+      <div className="grid grid-cols-[.85fr_1fr_.7fr_1.5fr_.7fr_1fr_.7fr_1.3fr] gap-3 border-b border-[#202b35] px-4 py-3 text-[10px] text-[#8d9aa5]">{['CLOSED', 'PAIR', 'SIDE', 'STRATEGY', 'DURATION', 'REALIZED P&L', 'R (MULTIPLE)', 'EXIT REASON'].map(label => <span key={label}>{label}</span>)}</div>
+      {recentTrades.map((trade) => <div key={trade[0]} className="grid grid-cols-[.85fr_1fr_.7fr_1.5fr_.7fr_1fr_.7fr_1.3fr] gap-3 border-b border-[#202b35] px-4 py-3 text-[12px] last:border-b-0"><span className="font-mono text-[#c5ced7]">{trade[0]}</span><span>{trade[1]}</span><span className={trade[2] === 'LONG' ? 'text-[#36d477]' : 'text-[#ff4d54]'}>{trade[2]}</span><span className="leading-tight">{trade[3]}</span><span className="font-mono">{trade[4]}</span><span className={`font-mono ${trade[8] === 'loss' ? 'text-[#ff4d54]' : 'text-[#36d477]'}`}>{trade[5]}</span><span className={`font-mono ${trade[8] === 'loss' ? 'text-[#ff4d54]' : 'text-[#36d477]'}`}>{trade[6]}</span><span>{trade[7]}</span></div>)}
+      <div className="px-4 py-4"><a className="text-[12px] text-[#3b8cff]">View all trades in Journal</a></div>
+    </section>
+  );
+}
+
+function DecisionQueue() {
+  return (
+    <section className="min-w-[620px]">
+      <div className="flex items-center justify-between border-b border-[#202b35] px-4 py-3"><h2 className="text-[12px] font-medium text-[#d1d9e0]">AGENT DECISION QUEUE</h2><span className="text-[#566675]">›</span></div>
+      <div className="grid grid-cols-[.8fr_.45fr_1fr_.65fr_1.35fr_.55fr_.7fr_.85fr_2fr] gap-3 border-b border-[#202b35] px-4 py-3 text-[10px] text-[#8d9aa5]">{['TIME', 'TYPE', 'CANDIDATE', 'SIDE', 'STRATEGY', 'CONF.', 'EXP. VALUE', 'STATUS', 'REASON / NOTES'].map(label => <span key={label}>{label}</span>)}</div>
+      {decisionQueue.map((event) => <div key={event[0] + event[2]} className="grid grid-cols-[.8fr_.45fr_1fr_.65fr_1.35fr_.55fr_.7fr_.85fr_2fr] gap-3 border-b border-[#202b35] px-4 py-3 text-[12px] last:border-b-0"><span className="font-mono text-[#c5ced7]">{event[0]}</span><span className={`text-[18px] leading-none ${event[9] === 'blocked' ? 'text-[#ff4d54]' : event[9] === 'opened' ? 'text-[#36d477]' : 'text-[#3b8cff]'}`}>{event[1]}</span><span>{event[2]}</span><span className={event[3] === 'LONG' ? 'text-[#36d477]' : 'text-[#ff4d54]'}>{event[3]}</span><span className="leading-tight">{event[4]}</span><span className="font-mono">{event[5]}</span><span className="font-mono text-[#36d477]">{event[6]}</span><span className={event[9] === 'blocked' ? 'text-[#ff4d54]' : event[9] === 'opened' ? 'text-[#36d477]' : 'text-[#3b8cff]'}>{event[7]}</span><span className="leading-tight text-[#dce4ea]">{event[8]}</span></div>)}
+      <div className="px-4 py-4 text-right"><a className="text-[12px] text-[#3b8cff]">View full log</a></div>
+    </section>
   );
 }
 
 export default function Page() {
+  const [halted, setHalted] = useState(false);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [agent, setAgent] = useState<AgentStatus | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const load = () => Promise.all([api.summary(), api.agentStatus()]).then(([nextSummary, nextAgent]) => {
+      if (!active) return;
+      setSummary(nextSummary);
+      setAgent(nextAgent);
+      setHalted(Boolean(nextSummary.kill_switch_active));
+    }).catch(() => undefined);
+    load();
+    const timer = window.setInterval(load, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+
   return (
-    <AuthGate>
-      <Dashboard />
-    </AuthGate>
+    <div className="min-h-screen min-w-[1486px] bg-[#080d12] font-sans text-[#e6edf3] selection:bg-[#174d82]">
+      <aside className="fixed inset-y-0 left-0 z-30 flex w-[186px] flex-col border-r border-[#202b35] bg-[#0b1117]">
+        <div className="flex h-[58px] items-center border-b border-[#202b35] px-5"><div className="text-[20px] font-semibold tracking-[-0.04em] text-[#dfe7ee]">Trading<span className="text-[#3b8cff]">AI</span></div></div>
+        <nav className="pt-4">
+          {navItems.map(({ label, icon: Icon }) => {
+            const active = label === "Dashboard";
+            return <a key={label} href="#" className={`flex h-[48px] items-center gap-3 border-l-2 px-5 text-[13px] transition-colors ${active ? "border-[#2e8bff] bg-[#101c29] text-[#3b8cff]" : "border-transparent text-[#c3cdd6] hover:bg-[#10171f]"}`}><Icon size={20} weight={active ? "fill" : "regular"} />{label}</a>;
+          })}
+        </nav>
+        <div className="mt-auto border-t border-[#202b35] px-5 py-5"><div className="flex items-center gap-2 text-[12px] text-[#36d477]"><span className="h-2 w-2 rounded-full bg-[#36d477]" />Main Account <span className="ml-auto text-[#9aa6b3]">⌄</span></div><div className="mt-3 pl-4 font-mono text-[11px] text-[#778692]">0x5a7b...23f1</div></div>
+      </aside>
+
+      <header className="fixed left-[186px] right-0 top-0 z-20 flex h-[58px] items-center justify-between border-b border-[#202b35] bg-[#080d12] px-6">
+        <div className="flex items-center gap-5 text-[13px]"><span className="border border-[#2e3e4d] px-4 py-2 font-medium text-[#3b8cff]">{agent?.testnet === false ? "LIVE" : "TESTNET"}</span><span className={`flex items-center gap-2 ${agent?.trading_agent === "ok" ? "text-[#36d477]" : "text-[#e5b638]"}`}><span className="h-2 w-2 rounded-full bg-current" />{agent?.trading_agent === "ok" ? "Agent Live" : "Agent checking"}</span><span className="h-5 w-px bg-[#334452]" /><span className="text-[#c2ccd5]">Last data sync: <span className="font-mono text-[#dfe7ee]">{agent ? new Date(agent.checked_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "—"} UTC</span></span></div>
+        <button onClick={() => setHalted(value => !value)} className={`border px-4 py-2 text-[12px] font-semibold transition-colors ${halted ? "border-[#36d477] text-[#36d477]" : "border-[#ff4d54] text-[#ff4d54] hover:bg-[#2b1419]"}`}><span className="mr-2">{halted ? "▶" : "Ⅱ"}</span>{halted ? "Resume entries" : "Halt entries"}</button>
+      </header>
+
+      <main className="ml-[186px] min-w-[1486px] overflow-x-auto pt-[58px]">
+        <MetricStrip live={summary} />
+        <ExposureRiskBand />
+        <OpenPositions />
+        <div className="grid min-w-[1240px] grid-cols-2"><RecentTrades /><DecisionQueue /></div>
+        <footer className="flex min-w-[980px] items-center justify-between border-t border-[#202b35] px-4 py-3 text-[11px] text-[#8f9aa5]"><div className="flex gap-8"><span>Server: <b className="font-normal text-[#36d477]">ok</b></span><span>Data Feed: <b className="font-normal text-[#36d477]">ok</b></span><span>Latency: <b className="font-normal text-[#dbe3e9]">112ms</b></span></div><span>Time: 12:31:04 UTC</span></footer>
+      </main>
+    </div>
   );
 }

@@ -4,34 +4,34 @@
   /* Shifted off absolute black to reduce text halation (bright text on pure
      #000/near-#000 causes visible "glow"/ghosting for many readers, worse
      at night). These carry a faint blue tint consistent with --accent. */
-  --bg:        #0a0d14;
-  --surface:   #111622;
-  --surface2:  #181f30;
-  --surface3:  #202b40;
-  --border:    #1f293e;
-  --border2:   #2d3b54;
-  --text:      #e2e6f0;
+  --bg:        #080b10;
+  --surface:   #0e131b;
+  --surface2:  #141a23;
+  --surface3:  #1b2430;
+  --border:    #202a36;
+  --border2:   #334154;
+  --text:      #e7edf5;
   /* Pre-existing #4a5570 measured ~2.4:1 against --surface/--surface2 — fails
      WCAG AA (4.5:1) for the body-size secondary text it's used for
      everywhere (labels, meta, timestamps). Lightened to pass comfortably
      (~5.6-6:1) while staying visually "muted" relative to --text. */
-  --muted:     #9aa5be;
-  --accent:    #3b82f6;
-  --accent2:   #6366f1;
+  --muted:     #8f9baa;
+  --accent:    #3b8cff;
+  --accent2:   #3b8cff;
   --green:     #22c55e;
   --green2:    #16a34a;
   --red:       #ef4444;
   --red2:      #dc2626;
   --amber:     #f59e0b;
   --amber2:    #d97706;
-  --purple:    #a855f7;
+  --purple:    #8f9baa;
 
   /* ---- Gradient tokens: one named family per semantic meaning, reused ---- */
   /* everywhere instead of one-off inline gradients per component.          */
-  --gradient-primary: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
-  --gradient-profit:  linear-gradient(135deg, var(--green) 0%, var(--green2) 100%);
-  --gradient-loss:    linear-gradient(135deg, var(--red) 0%, var(--red2) 100%);
-  --gradient-caution: linear-gradient(135deg, var(--amber) 0%, var(--amber2) 100%);
+  --gradient-primary: var(--accent);
+  --gradient-profit:  var(--green);
+  --gradient-loss:    var(--red);
+  --gradient-caution: var(--amber);
 
   /* ---- Type scale: fixed rem steps, ratio ~1.13-1.2 (product UI, not fluid) ---- */
   /* Floor lifted a step (was 11/12/13px) — this is a dense monitoring surface
@@ -58,7 +58,7 @@
 
   /* ---- Radius scale ---- */
   --radius-sm: 8px;    /* small controls: buttons, inputs, badges (non-pill), stat tiles */
-  --radius-md: 14px;   /* cards */
+  --radius-md: 6px;   /* cards */
   --radius-pill: 999px; /* pills: status badges, chips */
 
   /* ---- Motion tokens ---- */
@@ -260,10 +260,7 @@ details[open] > .reasoning-toggle::before {
               border-color var(--dur-base) var(--ease-out-quart);
 }
 .ui-stat-card--accent {
-  background: linear-gradient(135deg,
-    color-mix(in oklab, var(--stat-accent) 20%, var(--surface)) 0%,
-    color-mix(in oklab, var(--stat-accent) 8%, var(--surface)) 55%,
-    var(--surface) 100%);
+  background: color-mix(in oklab, var(--stat-accent) 7%, var(--surface));
   border-color: color-mix(in oklab, var(--stat-accent) 38%, var(--border));
 }
 .ui-stat-card--accent::before {
@@ -361,7 +358,8 @@ details[open] > .reasoning-toggle::before {
 }
 
 .page-main {
-  padding: var(--space-7) var(--space-7) 60px;
+  padding: 78px var(--space-7) 60px;
+  width: 100%;
 }
 
 @media (max-width: 860px) {
@@ -370,7 +368,7 @@ details[open] > .reasoning-toggle::before {
   }
 
   .page-main {
-    padding: var(--space-4) var(--space-4) calc(32px + env(safe-area-inset-bottom));
+    padding: 66px var(--space-4) calc(32px + env(safe-area-inset-bottom));
   }
 }
 
@@ -404,6 +402,42 @@ details[open] > .reasoning-toggle::before {
   z-index: var(--z-sticky);
 }
 
+.app-topbar {
+  position: fixed;
+  top: 0;
+  left: 208px;
+  right: 0;
+  height: 58px;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 24px;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.app-topbar__status,
+.app-topbar__live { display: flex; align-items: center; gap: 10px; }
+.app-topbar__status { min-width: 0; color: var(--muted); font-size: 12px; }
+.app-topbar__environment { color: var(--accent); font-weight: 700; letter-spacing: .03em; }
+.app-topbar__divider { width: 1px; height: 18px; background: var(--border2); }
+.app-topbar__live { color: var(--green); font-weight: 600; }
+.app-topbar__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.app-topbar__sync { margin-left: 8px; color: var(--muted); }
+.app-topbar__halt {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 70%, var(--border));
+  border-radius: 5px;
+  background: transparent;
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.app-topbar__halt:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }
+
 .sidebar-body {
   flex: 1;
   display: flex;
@@ -429,7 +463,15 @@ details[open] > .reasoning-toggle::before {
     border-right: none;
     border-bottom: 1px solid var(--border);
     padding: env(safe-area-inset-top) 6px 0 14px;
+    padding-top: calc(54px + env(safe-area-inset-top));
   }
+
+  .app-topbar {
+    left: 0;
+    height: 54px;
+    padding: 0 14px;
+  }
+  .app-topbar__sync { display: none; }
 
   .sidebar-hamburger {
     display: flex;
@@ -446,7 +488,7 @@ details[open] > .reasoning-toggle::before {
 
   .sidebar-body {
     position: fixed;
-    top: 0;
+    top: 54px;
     left: 0;
     bottom: 0;
     width: min(82vw, 300px);
@@ -520,5 +562,23 @@ details[open] > .reasoning-toggle::before {
   .log-row {
     grid-template-columns: 1fr !important;
     gap: 4px !important;
+  }
+}
+
+/* Reference screens use one desktop shell. A few mock-only routes carry their
+   own sidebar markup so they can stay self-contained; normalize that shell at
+   the theme boundary instead of letting each screen drift visually. */
+@media (min-width: 861px) {
+  aside.fixed.inset-y-0.left-0 {
+    width: 176px !important;
+    background: #050b10 !important;
+    border-color: #1a2b35 !important;
+  }
+
+  main.ml-\[122px\],
+  main.ml-\[134px\],
+  main.ml-\[142px\],
+  main.ml-\[186px\] {
+    margin-left: 176px !important;
   }
 }

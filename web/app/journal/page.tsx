@@ -1,242 +1,44 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { WarningCircle } from "@phosphor-icons/react";
-import AuthGate from "../components/AuthGate";
-import Sidebar from "../components/Sidebar";
-import { api, Summary, Trade, TradeNarrative } from "@/lib/api";
-import { Badge, StatCard } from "../components/ui";
+import { useMemo, useState } from "react";
+import { BookOpen, ChartLineUp, DownloadSimple, GearSix, House, MagnifyingGlass, Radio, ShieldWarning, ShoppingCart, SlidersHorizontal, Star, X } from "@phosphor-icons/react";
 
-const price = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+type Trade = { id: number; closed: string; coin: string; side: "LONG" | "SHORT"; strategy: string; opened: string; held: string; entry: string; exit: string; gross: number; fees: number; net: number; r: string; reason: string; thesis: string; invalidation: string };
 
-function outcomeColor(trade: Trade) {
-  if (trade.pnl_usdt == null) return "var(--amber)";
-  return trade.pnl_usdt >= 0 ? "var(--green)" : "var(--red)";
-}
+const trades: Trade[] = [
+  { id: 1, closed: "May 31, 14:32", coin: "SOL", side: "LONG", strategy: "AI Breakout v2", opened: "May 31, 08:15", held: "6h 17m", entry: "$165.42", exit: "$171.98", gross: 2980, fees: 52.31, net: 2927.69, r: "+1.76 R", reason: "Target Hit", thesis: "Breakout above 4H resistance with volume expansion and structure shift. Momentum alignment across 1H and 4H. AI Confidence: 72%", invalidation: "Close back below $163.20 (breakout level) or loss of 4H higher low structure." },
+  { id: 2, closed: "May 31, 11:07", coin: "ETH", side: "SHORT", strategy: "Trend Fade v1", opened: "May 31, 06:40", held: "4h 27m", entry: "$2,675.33", exit: "$2,587.11", gross: 3306.50, fees: 48.67, net: 3257.83, r: "+1.42 R", reason: "Target Hit", thesis: "Rejection from daily supply zone with bearish divergence on RSI.", invalidation: "4H close above $2,700." },
+  { id: 3, closed: "May 30, 02:14", coin: "BTC", side: "LONG", strategy: "AI Breakout v2", opened: "May 29, 21:12", held: "5h 02m", entry: "$105,312.50", exit: "$104,105.10", gross: -1207.40, fees: 37.85, net: -1245.25, r: "-0.72 R", reason: "Stop Hit", thesis: "Range expansion with positive momentum and rising volume.", invalidation: "Close below the breakout range." },
+  { id: 4, closed: "May 30, 22:41", coin: "AVAX", side: "LONG", strategy: "Range Continuation", opened: "May 30, 16:05", held: "6h 36m", entry: "$36.78", exit: "$38.10", gross: 1320, fees: 21.43, net: 1298.57, r: "+1.18 R", reason: "Target Hit", thesis: "Range support held with improving momentum and a clean reclaim.", invalidation: "Close back below range support." },
+  { id: 5, closed: "May 30, 17:33", coin: "LINK", side: "SHORT", strategy: "Mean Reversion v1", opened: "May 30, 09:58", held: "7h 35m", entry: "$18.42", exit: "$18.91", gross: -980, fees: 18.69, net: -998.69, r: "-0.65 R", reason: "Stop Hit", thesis: "Price extended into the upper range boundary with momentum exhaustion.", invalidation: "Acceptance above the range high." },
+  { id: 6, closed: "May 29, 13:50", coin: "SOL", side: "LONG", strategy: "AI Breakout v2", opened: "May 29, 04:10", held: "9h 40m", entry: "$160.12", exit: "$166.80", gross: 2916, fees: 51.22, net: 2864.78, r: "+1.64 R", reason: "Target Hit", thesis: "Breakout follow-through with strong volume and bullish structure.", invalidation: "Loss of the reclaimed level." },
+  { id: 7, closed: "May 30, 09:22", coin: "BTC", side: "SHORT", strategy: "Trend Fade v1", opened: "May 29, 23:15", held: "10h 07m", entry: "$106,210.00", exit: "$107,590.00", gross: -1380, fees: 39.41, net: -1419.41, r: "-0.81 R", reason: "Stop Hit", thesis: "Fade from a stretched daily range high.", invalidation: "Continuation above the daily high." },
+  { id: 8, closed: "May 29, 01:03", coin: "ETH", side: "LONG", strategy: "Range Continuation", opened: "May 28, 14:22", held: "6h 41m", entry: "$2,618.45", exit: "$2,664.21", gross: 1832.40, fees: 34.56, net: 1797.84, r: "+0.93 R", reason: "Time Exit", thesis: "Range midpoint reclaim with supportive short-term momentum.", invalidation: "Loss of range midpoint." },
+];
 
-function pctChange(trade: Trade): number | null {
-  if (trade.exit_price == null || !trade.entry_price) return null;
-  const direction = trade.side === "long" ? 1 : -1;
-  return ((trade.exit_price - trade.entry_price) / trade.entry_price) * direction * 100;
-}
+const nav = [["Overview", House], ["Strategies", ChartLineUp], ["Signals", Radio], ["Positions", ShoppingCart], ["Orders", ShoppingCart], ["Risk", ShieldWarning], ["Backtests", ChartLineUp], ["Journal", BookOpen], ["Edge Explorer", SlidersHorizontal], ["Reports", ChartLineUp], ["Playbook", BookOpen]] as const;
 
-function TradeRow({ trade, isOpen, onToggle, rowRef, highlighted }: {
-  trade: Trade; isOpen: boolean; onToggle: () => void; rowRef: (el: HTMLDivElement | null) => void; highlighted: boolean;
-}) {
-  const color = outcomeColor(trade);
-  const pct = pctChange(trade);
-  const pnl = trade.pnl_usdt == null ? "open" : pct !== null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%` : "—";
-  const [narrative, setNarrative] = useState<TradeNarrative | null>(null);
-  const [narrativeError, setNarrativeError] = useState(false);
+function money(value: number) { return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 
-  useEffect(() => {
-    if (!isOpen || narrative || narrativeError) return;
-    api.tradeNarrative(trade.id).then(setNarrative).catch(() => setNarrativeError(true));
-  }, [isOpen, narrative, narrativeError, trade.id]);
-
-  return (
-    <div ref={rowRef} style={{ borderBottom: "1px solid var(--border)", background: highlighted ? "var(--surface2)" : "transparent", transition: "background var(--dur-base) var(--ease-out-quart)" }}>
-      <button
-        onClick={onToggle}
-        style={{
-          width: "100%",
-          background: "transparent",
-          border: 0,
-          color: "var(--text)",
-          cursor: "pointer",
-          display: "grid",
-          gridTemplateColumns: "minmax(180px, 1.2fr) minmax(160px, 1fr) 120px 180px",
-          gap: 16,
-          alignItems: "center",
-          padding: "13px 16px",
-          textAlign: "left",
-          transition: "background var(--dur-base) var(--ease-out-quart)",
-        }}
-        className="journal-row"
-      >
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontWeight: 700, fontSize: "var(--text-base)" }}>{trade.symbol}</span>
-            <Badge color={trade.side === "long" ? "var(--green)" : "var(--red)"}>{trade.side.toUpperCase()}</Badge>
-          </div>
-          <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", marginTop: 3 }}>{trade.strategy_name} / {trade.regime}</div>
-        </div>
-        <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{trade.exit_reason || trade.entry_reasoning[0] || "-"}</div>
-        <div style={{ color, fontWeight: 800, fontSize: "var(--text-sm)", textAlign: "right" }}>{pnl}</div>
-        <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", textAlign: "right" }}>
-          {new Date(trade.opened_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-        </div>
-      </button>
-
-      {isOpen && (
-        <div style={{ background: "var(--surface2)", borderTop: "1px solid var(--border)", padding: 16 }} className="rise-in">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(120px, 1fr))", gap: 10, marginBottom: 14 }} className="journal-detail-grid">
-            {[
-              ["Entry", price.format(trade.entry_price)],
-              ["Exit", trade.exit_price == null ? "-" : price.format(trade.exit_price)],
-              ["Stop Loss", price.format(trade.stop_loss)],
-              ["Take Profit", price.format(trade.take_profit)],
-              ["At risk", (() => {
-                const riskPct = (trade.indicator_snapshot as Record<string, unknown>)?.actual_risk_pct;
-                return typeof riskPct === "number" ? `${riskPct.toFixed(2)}%` : "n/a";
-              })()],
-            ].map(([label, value]) => (
-              <div key={label} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "9px 10px", background: "var(--surface)" }}>
-                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", marginBottom: 3 }}>{label}</div>
-                <div style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700, fontSize: "var(--text-sm)" }}>{value}</div>
-              </div>
-            ))}
-          </div>
-
-          {!narrative ? (
-            <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)" }}>{narrativeError ? "Could not load reasoning." : "Loading reasoning…"}</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: "var(--text-2xs)", color: "var(--muted)" }}>
-                {narrative.confidence !== null && <span>Conf {narrative.confidence.toFixed(2)}</span>}
-                {narrative.ev_r !== null && <span>EV {narrative.ev_r >= 0 ? "+" : ""}{narrative.ev_r.toFixed(2)}R</span>}
-                {narrative.risk_pct !== null && <span>Risk {narrative.risk_pct.toFixed(2)}%</span>}
-                <span>R:R {narrative.rr.toFixed(1)}</span>
-              </div>
-
-              <div>
-                <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, marginBottom: 4 }}>Thesis</div>
-                <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.6 }}>{narrative.thesis_lines.join(" ")}</div>
-              </div>
-
-              {narrative.why_accepted_lines.length > 0 && (
-                <div>
-                  <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, marginBottom: 4 }}>Why accepted</div>
-                  <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.6 }}>{narrative.why_accepted_lines.join(" ")}</div>
-                </div>
-              )}
-
-              {narrative.weakness_line && (
-                <div style={{ color: "var(--amber)", fontSize: "var(--text-xs)", lineHeight: 1.5, display: "flex", gap: 4 }}>
-                  <WarningCircle size={13} style={{ flexShrink: 0, marginTop: 2 }} /> Weakness: {narrative.weakness_line}
-                </div>
-              )}
-
-              <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", lineHeight: 1.5 }}>Invalidation: {narrative.invalidation_line}</div>
-
-              {narrative.past_context_line && (
-                <div style={{ color: "var(--muted)", fontSize: "var(--text-xs)", lineHeight: 1.5 }}>Past context: {narrative.past_context_line}</div>
-              )}
-
-              {narrative.outcome && (
-                <>
-                  <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-                    <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, marginBottom: 4 }}>
-                      {narrative.outcome === "loss" ? "Why it failed" : "Result"}
-                    </div>
-                    <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.6 }}>{narrative.failure_line}</div>
-                  </div>
-                  {narrative.lesson_line && (
-                    <div>
-                      <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)", fontWeight: 700, marginBottom: 4 }}>Lesson</div>
-                      <div style={{ color: "var(--text)", fontSize: "var(--text-xs)", lineHeight: 1.6 }}>{narrative.lesson_line}</div>
-                    </div>
-                  )}
-                  <div style={{ color: "var(--muted)", fontSize: "var(--text-2xs)" }}>
-                    Exit reason: {narrative.exit_reason || "—"} · R: {narrative.r_multiple !== null ? `${narrative.r_multiple >= 0 ? "+" : ""}${narrative.r_multiple.toFixed(1)}R` : "—"} · Held: {narrative.held_duration || "—"}
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function JournalContent() {
-  const searchParams = useSearchParams();
-  const highlightId = searchParams.get("trade") ? Number(searchParams.get("trade")) : null;
-
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [openId, setOpenId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
-
-  useEffect(() => {
-    api.trades(100).then(setTrades).catch(() => setError("Could not load trades"));
-    api.summary().then(setSummary).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (highlightId === null || trades.length === 0) return;
-    setOpenId(highlightId);
-    const el = rowRefs.current[highlightId];
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightId, trades.length]);
-
-  const stats = useMemo(() => {
-    // Prefer the backend's all-time totals (summary) — trades is capped at
-    // the last 100 fetched, so summing it directly would silently disagree
-    // with the true total once there are more than 100 closed trades. ROI%
-    // needs the bankroll, which only summary carries, so there's no
-    // meaningful client-side fallback for it (shown as "—" until it loads).
-    if (summary) {
-      return { closed: summary.total_trades, roiPct: summary.roi_pct as number | null, winRate: summary.win_rate_pct };
-    }
-    const closed = trades.filter(t => t.closed_at);
-    const wins = closed.filter(t => (t.pnl_usdt || 0) > 0).length;
-    return {
-      closed: closed.length,
-      roiPct: null as number | null,
-      winRate: closed.length ? (wins / closed.length) * 100 : 0,
-    };
-  }, [trades, summary]);
-
-  return (
-    <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
-      <Sidebar />
-      <main className="page-main" style={{ flex: 1, minWidth: 0, maxWidth: 1560, margin: "0 auto" }}>
-        <div className="header-row" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, marginBottom: 18, flexWrap: "wrap" }}>
-          <div>
-            <h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, margin: 0 }}>Trade Journal</h1>
-            <p style={{ color: "var(--muted)", fontSize: "var(--text-xs)", margin: "4px 0 0" }}>{trades.length} recorded trades</p>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(110px, 1fr))", gap: 10 }}>
-            <StatCard label="Closed" value={String(stats.closed)} />
-            <StatCard label="Win Rate" value={`${stats.winRate.toFixed(1)}%`} />
-            <StatCard label="ROI" value={stats.roiPct !== null ? `${stats.roiPct >= 0 ? "+" : ""}${stats.roiPct.toFixed(2)}%` : "—"} color={stats.roiPct !== null ? (stats.roiPct >= 0 ? "var(--green)" : "var(--red)") : undefined} accent={stats.roiPct !== null ? (stats.roiPct >= 0 ? "var(--green)" : "var(--red)") : undefined} />
-          </div>
-        </div>
-
-        {error && <div style={{ color: "var(--red)", fontSize: "var(--text-sm)", marginBottom: 12 }}>{error}</div>}
-
-        <div className="ui-card">
-          {trades.length > 0 ? (
-            trades.map((trade) => (
-              <TradeRow
-                key={trade.id}
-                trade={trade}
-                isOpen={openId === trade.id}
-                onToggle={() => setOpenId(openId === trade.id ? null : trade.id)}
-                rowRef={(el) => { rowRefs.current[trade.id] = el; }}
-                highlighted={highlightId === trade.id}
-              />
-            ))
-          ) : (
-            <div style={{ padding: 32, color: "var(--muted)", textAlign: "center", fontSize: "var(--text-sm)" }}>No trades logged yet.</div>
-          )}
-        </div>
-      </main>
-    </div>
-  );
-}
-
-export default function Page() {
-  return (
-    <AuthGate>
-      <Suspense fallback={<div style={{ padding: 32, color: "var(--muted)" }}>Loading…</div>}>
-        <JournalContent />
-      </Suspense>
-    </AuthGate>
-  );
+export default function JournalPage() {
+  const [selectedId, setSelectedId] = useState(1);
+  const [coin, setCoin] = useState("All Coins");
+  const [strategy, setStrategy] = useState("All Strategies");
+  const [exitReason, setExitReason] = useState("All Exit Reasons");
+  const selected = trades.find((trade) => trade.id === selectedId) ?? trades[0];
+  const visible = useMemo(() => trades.filter((trade) => (coin === "All Coins" || trade.coin === coin) && (strategy === "All Strategies" || trade.strategy === strategy) && (exitReason === "All Exit Reasons" || trade.reason === exitReason)), [coin, strategy, exitReason]);
+  return <div className="min-h-screen min-w-[1450px] bg-[#04090e] text-[#dce5ed]">
+    <aside className="fixed inset-y-0 left-0 flex w-[176px] flex-col border-r border-[#182832] bg-[#071016]">
+      <div className="flex h-[64px] items-center gap-2 border-b border-[#182832] px-5 text-[20px] font-semibold">Trading<span className="text-[#299cff]">AI</span></div>
+      <nav className="flex-1 py-3">{nav.map(([label, Icon]) => <div key={label} className={`flex h-11 items-center gap-3 border-l-2 px-5 text-[12px] ${label === "Journal" ? "border-[#318fff] bg-[#122337] text-[#e7f3ff]" : "border-transparent text-[#a8b6c3]"}`}><Icon size={18} />{label}</div>)}</nav>
+      <div className="border-t border-[#182832] p-4 text-[11px] text-[#9babb8]"><div className="flex items-center gap-2 text-[#e5edf4]"><i className="h-2 w-2 rounded-full bg-[#37d978]" />Main Account <span className="ml-auto">⌄</span></div><div className="mt-3 font-mono">0x5a7b...23f1</div><div className="mt-5 flex items-center gap-2"><span className="rounded-full border border-[#385166] px-2 py-1 text-[10px]">Pro Plan</span><GearSix size={15} /></div></div>
+    </aside>
+    <main className="ml-[176px] px-6 py-6">
+      <header className="flex items-start justify-between"><div><h1 className="text-[21px] font-semibold">Trade Journal</h1><p className="mt-1 text-[12px] text-[#8495a3]">Review closed trades to validate edge and improve.</p></div><div className="flex gap-2"><button className="flex h-9 items-center gap-2 border border-[#354b59] bg-[#09141c] px-3 text-[11px]">▣ May 1 – May 31, 2025⌄</button><select value={coin} onChange={(e) => setCoin(e.target.value)} className="h-9 border border-[#354b59] bg-[#09141c] px-3 text-[11px] text-[#dbe5ed]"><option>All Coins</option><option>SOL</option><option>ETH</option><option>BTC</option><option>AVAX</option><option>LINK</option></select><select value={strategy} onChange={(e) => setStrategy(e.target.value)} className="h-9 border border-[#354b59] bg-[#09141c] px-3 text-[11px] text-[#dbe5ed]"><option>All Strategies</option><option>AI Breakout v2</option><option>Trend Fade v1</option><option>Range Continuation</option><option>Mean Reversion v1</option></select><select value={exitReason} onChange={(e) => setExitReason(e.target.value)} className="h-9 border border-[#354b59] bg-[#09141c] px-3 text-[11px] text-[#dbe5ed]"><option>All Exit Reasons</option><option>Target Hit</option><option>Stop Hit</option><option>Time Exit</option></select><button className="flex h-9 items-center gap-2 border border-[#298fff] bg-[#08243d] px-3 text-[11px] text-[#76c7ff]"><DownloadSimple size={16} />Export</button></div></header>
+      <section className="mt-4 grid grid-cols-6 border border-[#1a303b] bg-[#071118]">{[["NET P&L (AFTER FEES)", "$18,642.27", "+12.41%", "vs prev 31 days +7.23%"], ["WIN RATE", "57.6%", "94 / 163", "vs prev 31 days +4.8pp"], ["EXPECTANCY (R)", "0.78 R", "", "vs prev 31 days +0.19 R"], ["PROFIT FACTOR", "1.68", "", "vs prev 31 days +0.24"], ["FEES + SLIPPAGE", "$1,842.31", "(1.23% of gross)", "vs prev 31 days (1.11%)"], ["SAMPLE SIZE", "163", "", "vs prev 31 days +28"]].map(([label, value, sub, note]) => <div key={label} className="border-r border-[#1a303b] px-5 py-4 last:border-0"><div className="text-[10px] font-semibold tracking-[.1em] text-[#94a5b2]">{label}</div><div className={`mt-2 font-mono text-[20px] ${label === "NET P&L (AFTER FEES)" ? "text-[#4de187]" : "text-[#e2eaf1]"}`}>{value}</div><div className="mt-1 text-[11px] text-[#57d986]">{sub}</div><div className="mt-2 text-[10px] text-[#758694]">{note}</div></div>)}</section>
+      <section className="mt-4 border border-[#1a303b] bg-[#071118]"><div className="flex h-12 items-center justify-between border-b border-[#1a303b] px-4"><h2 className="text-[14px] font-medium">Closed Trades ({visible.length})</h2><div className="flex gap-3 text-[#8fa0ad]"><button aria-label="Columns">▥ Columns</button><button aria-label="Filter">▽</button><button aria-label="Settings"><GearSix size={16} /></button></div></div><div className="overflow-hidden"><table className="w-full border-collapse text-[11px]"><thead className="text-left text-[10px] text-[#8b9ca9]"><tr>{["Date Closed", "Coin", "Side", "Strategy", "Opened", "Held", "Entry", "Exit", "Gross P&L (USD)", "Fees (USD)", "Net P&L (USD)", "R Result", "Exit Reason"].map((head) => <th key={head} className="border-b border-[#1a303b] px-3 py-3 font-medium">{head}</th>)}</tr></thead><tbody>{visible.map((trade) => <tr key={trade.id} onClick={() => setSelectedId(trade.id)} className={`cursor-pointer border-b border-[#182832] hover:bg-[#0d1b25] ${selected.id === trade.id ? "bg-[#0c2237] outline outline-1 outline-[#258ee8] outline-offset-[-1px]" : ""}`}><td className="whitespace-nowrap px-3 py-3 font-mono text-[#c1ccd5]">{trade.closed}</td><td className="px-3 py-3 font-semibold">◉ {trade.coin}</td><td className={`px-3 py-3 font-semibold ${trade.side === "LONG" ? "text-[#40da81]" : "text-[#ff555c]"}`}>{trade.side}</td><td className="px-3 py-3 text-[#c7d2db]">{trade.strategy}</td><td className="whitespace-nowrap px-3 py-3 text-[#a9b7c2]">{trade.opened}</td><td className="px-3 py-3 text-[#a9b7c2]">{trade.held}</td><td className="px-3 py-3 font-mono">{trade.entry}</td><td className="px-3 py-3 font-mono">{trade.exit}</td><td className={`px-3 py-3 font-mono ${trade.gross >= 0 ? "text-[#45dd84]" : "text-[#ff5960]"}`}>{money(trade.gross)}</td><td className="px-3 py-3 font-mono text-[#bac6d0]">${trade.fees.toFixed(2)}</td><td className={`px-3 py-3 font-mono font-semibold ${trade.net >= 0 ? "text-[#45dd84]" : "text-[#ff5960]"}`}>{money(trade.net)}</td><td className={`px-3 py-3 font-mono ${trade.net >= 0 ? "text-[#45dd84]" : "text-[#ff5960]"}`}>{trade.r}</td><td className="px-3 py-3 whitespace-nowrap text-[#b8c4ce]">{trade.reason}</td></tr>)}</tbody></table></div></section>
+      <section className="mt-3 grid grid-cols-[1.05fr_1.2fr_1fr] border border-[#1a303b] bg-[#071118]"><div className="border-r border-[#1a303b] p-4"><div className="flex items-center gap-3"><h2 className="text-[13px] font-medium">Trade Details</h2><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${selected.net >= 0 ? "bg-[#123927] text-[#45dc84]" : "bg-[#421d25] text-[#ff686d]"}`}>{selected.net >= 0 ? "WIN" : "LOSS"}</span><span className="font-mono text-[12px] text-[#47dd86]">R Result {selected.r}</span></div><dl className="mt-4 grid grid-cols-2 gap-y-3 text-[11px]"><dt className="text-[#8293a0]">Coin</dt><dd>{selected.coin}</dd><dt className="text-[#8293a0]">Side</dt><dd className={selected.side === "LONG" ? "text-[#40da81]" : "text-[#ff555c]"}>{selected.side}</dd><dt className="text-[#8293a0]">Strategy</dt><dd>{selected.strategy}</dd><dt className="text-[#8293a0]">Opened</dt><dd>{selected.opened}</dd><dt className="text-[#8293a0]">Closed</dt><dd>{selected.closed}</dd><dt className="text-[#8293a0]">Held</dt><dd>{selected.held}</dd><dt className="text-[#8293a0]">Position Size</dt><dd>2.50 {selected.coin} (10.0% risk)</dd><dt className="text-[#8293a0]">Entry</dt><dd>{selected.entry}</dd><dt className="text-[#8293a0]">Exit</dt><dd>{selected.exit}</dd><dt className="text-[#8293a0]">Gross P&L</dt><dd className="text-[#45dd84]">{money(selected.gross)}</dd><dt className="text-[#8293a0]">Fees</dt><dd>${selected.fees.toFixed(2)}</dd><dt className="text-[#8293a0]">Net P&L</dt><dd className="text-[#45dd84]">{money(selected.net)}</dd></dl></div><div className="grid grid-cols-2 gap-4 border-r border-[#1a303b] p-4"><div><h3 className="text-[13px] font-medium">▤ Entry Thesis</h3><p className="mt-3 text-[11px] leading-5 text-[#c5d1db]">{selected.thesis}</p><h3 className="mt-6 text-[13px] font-medium">✦ What Changed</h3><p className="mt-3 text-[11px] leading-5 text-[#c5d1db]">Price continued with sustained volume. No bearish divergence appeared and the structure remained intact.</p><h3 className="mt-6 text-[13px] font-medium text-[#ff5a61]">♧ Invalidation</h3><p className="mt-3 text-[11px] leading-5 text-[#c5d1db]">{selected.invalidation}</p></div><div><h3 className="text-[13px] font-medium">◉ Exit Reason</h3><p className="mt-3 text-[11px] text-[#48dd86]">{selected.reason}</p><p className="mt-2 text-[11px] leading-5 text-[#c5d1db]">Reached target with the planned exit rules. Trailing protection was not needed.</p><h3 className="mt-6 text-[13px] font-medium">▤ Exit Details</h3><p className="mt-3 text-[11px] leading-5 text-[#c5d1db]">Target was reached cleanly and the position was closed according to the active profile.</p><div className="mt-5 border border-[#583a6e] bg-[#1d1328] p-3"><div className="text-[12px] font-semibold text-[#c88bff]">Lesson Observed <span className="text-[10px] font-normal">(Observe-Only)</span></div><p className="mt-2 text-[10px] leading-4 text-[#c2b5cd]">Breakouts with high volume alignment have higher follow-through probability. This is an observation only. Not a rule.</p></div></div></div><div className="p-4"><h2 className="text-[13px] font-medium">Strategy Comparison <span className="text-[10px] text-[#8495a3]">(This Period)</span></h2><table className="mt-4 w-full border-collapse text-[11px]"><thead className="text-left text-[10px] text-[#8495a3]"><tr><th className="pb-3">Strategy</th><th className="pb-3">Net P&L (USD)</th><th className="pb-3">Expectancy (R)</th><th className="pb-3">Win Rate</th><th className="pb-3">Profit Factor</th></tr></thead><tbody>{[["AI Breakout v2", "$10,842.21", "0.92 R", "62.3%", "1.94"], ["Trend Fade v1", "$4,321.75", "0.45 R", "54.5%", "1.42"], ["Range Continuation", "$2,876.18", "0.38 R", "58.3%", "1.33"], ["Mean Reversion v1", "$651.12", "0.12 R", "47.1%", "1.12"], ["Momentum Surge v1", "-$48.99", "-0.04 R", "42.9%", "0.96"], ["Total / Average", "$18,642.27", "0.78 R", "57.6%", "1.68"]].map((row) => <tr key={row[0]} className="border-t border-[#182832]"><td className="py-3">{row[0]}</td>{row.slice(1).map((cell, index) => <td key={index} className={`py-3 font-mono ${cell.startsWith("-") ? "text-[#ff5960]" : index === 0 || index === 1 ? "text-[#45dd84]" : "text-[#dce5ed]"}`}>{cell}</td>)}</tr>)}</tbody></table></div></section>
+      <footer className="mt-3 text-[10px] text-[#778896]">All times in UTC &nbsp; | &nbsp; Fees include taker fees and estimated slippage</footer>
+    </main>
+  </div>;
 }

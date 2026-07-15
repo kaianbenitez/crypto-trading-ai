@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Gauge, Broadcast, BookOpen, Eye, ShieldWarning, Brain, GearSix,
-  ClockCounterClockwise, ArrowSquareOut, SignOut, List, X, ChartLineUp,
+  Gauge, Broadcast, BookOpen, Eye, ShieldWarning, GearSix,
+  SignOut, List, X, ChartLineUp,
 } from "@phosphor-icons/react";
 import { AgentStatus, api } from "@/lib/api";
 
@@ -44,12 +44,8 @@ const NAV_ITEMS = [
   { label: "Strategy",   href: "/strategy", icon: ChartLineUp },
   { label: "Coin Watch", href: "/coins",    icon: Eye },
   { label: "Risk",       href: "/risk",     icon: ShieldWarning },
-  { label: "Adaptive",   href: "/adaptive", icon: Brain },
   { label: "Settings",   href: "/settings", icon: GearSix },
-  { label: "Changelog",  href: "/changelog", icon: ClockCounterClockwise },
 ];
-
-const MLB_URL = "/mlb/";
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -113,6 +109,29 @@ export default function Sidebar() {
 
   return (
     <aside className="sidebar">
+      <header className="app-topbar">
+        <div className="app-topbar__status">
+          <span className="app-topbar__environment">{status?.testnet ? "TESTNET" : "LIVE"}</span>
+          <span className="app-topbar__divider" aria-hidden="true" />
+          <span className="app-topbar__live">
+            <span className="app-topbar__dot" aria-hidden="true" />
+            {label}
+          </span>
+          <span className="app-topbar__sync">Last data sync: {status ? "connected" : "checking"}</span>
+        </div>
+        <button
+          className="app-topbar__halt"
+          type="button"
+          aria-label="Halt new entries"
+          onClick={() => {
+            if (window.confirm("Halt new entries? Open positions will continue to be managed.")) {
+              api.setKillSwitch(true, "manual halt (top bar)").catch(() => {});
+            }
+          }}
+        >
+          <span aria-hidden="true">■</span> Halt entries
+        </button>
+      </header>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
         <Link href="/" style={{ padding: "18px 18px 14px", display: "flex", alignItems: "center", gap: 8, textDecoration: "none" }}>
           <span style={{ width: 24, height: 24, background: "var(--gradient-primary)", borderRadius: 7, display: "inline-block", flexShrink: 0, boxShadow: "0 2px 8px color-mix(in oklab, var(--accent) 45%, transparent)" }} />
@@ -153,21 +172,6 @@ export default function Sidebar() {
             );
           })}
 
-          <div style={{ margin: "10px 0 6px", borderTop: "1px solid var(--border)" }} />
-          <span style={{ fontSize: "var(--text-2xs)", fontWeight: 700, color: "var(--muted)", letterSpacing: "0.08em", padding: "0 10px", display: "block", marginBottom: 4 }}>SPORTS</span>
-          <a
-            href={MLB_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="nav-link"
-            style={{
-              justifyContent: "space-between",
-              color: "var(--muted)", fontWeight: 500,
-            }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: 10 }}>MLB Bets</span>
-            <ArrowSquareOut size={13} style={{ opacity: 0.6 }} />
-          </a>
         </nav>
 
         <div ref={ref} style={{ padding: 10, borderTop: "1px solid var(--border)", position: "relative" }}>

@@ -1,61 +1,64 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import AuthGate from "../components/AuthGate";
-import Sidebar from "../components/Sidebar";
-import CoinDigestCard from "../components/CoinDigestCard";
-import { api, CoinDigest } from "@/lib/api";
-import { Card } from "../components/ui";
+import { useMemo, useState } from "react";
+import { ChartLineUp, Check, GearSix, MagnifyingGlass, Monitor, SlidersHorizontal, X } from "@phosphor-icons/react";
 
-function CoinWatchContent() {
-  const [digests, setDigests] = useState<CoinDigest[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+type Coin = { symbol: string; volume: string; spread: string; atr: string; regime: "TRENDING UP" | "RANGING" | "DOWNTREND"; momentum: string; liquidity: number; rank: number; score: string; state: "SHORTLISTED" | "CANDIDATE" | "BENCHED" | "BLOCKED"; price: string; change: string };
 
-  useEffect(() => {
-    api.coinDigests()
-      .then(setDigests)
-      .catch(() => setError("Could not load coin digests"))
-      .finally(() => setLoading(false));
-  }, []);
+const coins: Coin[] = [
+  { symbol: "BTC", volume: "29.42B", spread: "1.2", atr: "2.31", regime: "TRENDING UP", momentum: "1.48", liquidity: 90, rank: 1, score: "82.1", state: "SHORTLISTED", price: "67,245.1", change: "+1.36%" },
+  { symbol: "ETH", volume: "18.76B", spread: "1.6", atr: "2.89", regime: "TRENDING UP", momentum: "1.21", liquidity: 89, rank: 2, score: "79.4", state: "SHORTLISTED", price: "3,512.80", change: "+0.82%" },
+  { symbol: "SOL", volume: "6.31B", spread: "1.8", atr: "3.45", regime: "TRENDING UP", momentum: "1.35", liquidity: 84, rank: 5, score: "74.8", state: "SHORTLISTED", price: "148.32", change: "+2.12%" },
+  { symbol: "BNB", volume: "2.81B", spread: "1.7", atr: "2.61", regime: "RANGING", momentum: "0.42", liquidity: 82, rank: 4, score: "66.3", state: "CANDIDATE", price: "577.64", change: "+0.37%" },
+  { symbol: "XRP", volume: "2.45B", spread: "1.9", atr: "2.72", regime: "TRENDING UP", momentum: "0.98", liquidity: 79, rank: 6, score: "64.1", state: "CANDIDATE", price: "0.5241", change: "+1.08%" },
+  { symbol: "ADA", volume: "1.24B", spread: "2.1", atr: "3.12", regime: "RANGING", momentum: "0.11", liquidity: 74, rank: 10, score: "57.3", state: "CANDIDATE", price: "0.3862", change: "-0.22%" },
+  { symbol: "AVAX", volume: "1.08B", spread: "2.0", atr: "3.67", regime: "TRENDING UP", momentum: "0.76", liquidity: 72, rank: 11, score: "55.2", state: "CANDIDATE", price: "36.78", change: "+1.44%" },
+  { symbol: "LINK", volume: "896.3M", spread: "2.3", atr: "3.21", regime: "RANGING", momentum: "-0.05", liquidity: 70, rank: 14, score: "52.0", state: "CANDIDATE", price: "18.42", change: "-0.68%" },
+  { symbol: "DOGE", volume: "872.6M", spread: "2.6", atr: "3.84", regime: "RANGING", momentum: "0.32", liquidity: 66, rank: 8, score: "50.2", state: "CANDIDATE", price: "0.1421", change: "+0.12%" },
+  { symbol: "MATIC", volume: "691.5M", spread: "2.2", atr: "2.98", regime: "RANGING", momentum: "0.28", liquidity: 66, rank: 13, score: "48.3", state: "BENCHED", price: "0.7132", change: "-1.03%" },
+  { symbol: "DOT", volume: "612.4M", spread: "2.1", atr: "3.33", regime: "DOWNTREND", momentum: "-0.08", liquidity: 64, rank: 15, score: "44.6", state: "BLOCKED", price: "6.22", change: "-1.77%" },
+  { symbol: "LTC", volume: "587.2M", spread: "2.4", atr: "2.71", regime: "RANGING", momentum: "0.07", liquidity: 63, rank: 22, score: "44.1", state: "BENCHED", price: "84.06", change: "-0.35%" },
+  { symbol: "ARB", volume: "534.8M", spread: "2.2", atr: "3.07", regime: "RANGING", momentum: "0.23", liquidity: 62, rank: 21, score: "43.7", state: "BENCHED", price: "0.921", change: "+0.24%" },
+  { symbol: "ATOM", volume: "472.9M", spread: "2.5", atr: "3.62", regime: "DOWNTREND", momentum: "-0.71", liquidity: 59, rank: 28, score: "39.2", state: "BLOCKED", price: "8.31", change: "-2.18%" },
+  { symbol: "NEAR", volume: "452.1M", spread: "2.3", atr: "3.16", regime: "RANGING", momentum: "0.01", liquidity: 58, rank: 24, score: "38.7", state: "BENCHED", price: "5.10", change: "-0.41%" },
+  { symbol: "UNI", volume: "438.7M", spread: "2.6", atr: "3.09", regime: "DOWNTREND", momentum: "-0.62", liquidity: 57, rank: 16, score: "37.4", state: "BLOCKED", price: "7.92", change: "-1.62%" },
+  { symbol: "ALGO", volume: "398.6M", spread: "2.7", atr: "3.48", regime: "DOWNTREND", momentum: "-0.91", liquidity: 55, rank: 30, score: "34.2", state: "BLOCKED", price: "0.182", change: "-1.95%" },
+  { symbol: "FIL", volume: "362.3M", spread: "2.8", atr: "3.93", regime: "DOWNTREND", momentum: "-1.15", liquidity: 53, rank: 31, score: "31.1", state: "BLOCKED", price: "4.80", change: "-2.36%" },
+  { symbol: "ICP", volume: "319.4M", spread: "2.9", atr: "4.01", regime: "DOWNTREND", momentum: "-1.02", liquidity: 51, rank: 32, score: "29.8", state: "BLOCKED", price: "8.04", change: "-2.04%" },
+  { symbol: "APT", volume: "312.8M", spread: "2.6", atr: "3.44", regime: "RANGING", momentum: "-0.18", liquidity: 50, rank: 29, score: "29.6", state: "BENCHED", price: "8.73", change: "-0.55%" },
+  { symbol: "SUI", volume: "285.7M", spread: "2.7", atr: "3.56", regime: "DOWNTREND", momentum: "-0.77", liquidity: 49, rank: 33, score: "28.0", state: "BLOCKED", price: "0.908", change: "-1.91%" },
+  { symbol: "VET", volume: "274.2M", spread: "2.9", atr: "2.94", regime: "DOWNTREND", momentum: "-0.53", liquidity: 48, rank: 41, score: "26.6", state: "BLOCKED", price: "0.034", change: "-1.20%" },
+  { symbol: "ETM", volume: "246.8M", spread: "3.0", atr: "3.81", regime: "DOWNTREND", momentum: "-0.84", liquidity: 47, rank: 50, score: "24.3", state: "BLOCKED", price: "0.064", change: "-2.14%" },
+  { symbol: "SAND", volume: "238.6M", spread: "3.1", atr: "3.97", regime: "DOWNTREND", momentum: "-1.05", liquidity: 45, rank: 50, score: "23.3", state: "BLOCKED", price: "0.311", change: "-2.44%" },
+  { symbol: "AXS", volume: "212.6M", spread: "3.2", atr: "4.12", regime: "DOWNTREND", momentum: "-1.18", liquidity: 44, rank: 60, score: "21.4", state: "BLOCKED", price: "4.92", change: "-2.81%" },
+  { symbol: "GALA", volume: "198.5M", spread: "3.3", atr: "4.38", regime: "DOWNTREND", momentum: "-1.27", liquidity: 42, rank: 63, score: "20.1", state: "BLOCKED", price: "0.021", change: "-2.95%" },
+  { symbol: "ENJ", volume: "182.7M", spread: "3.4", atr: "4.21", regime: "DOWNTREND", momentum: "-1.20", liquidity: 41, rank: 70, score: "18.9", state: "BLOCKED", price: "0.302", change: "-2.10%" },
+  { symbol: "CHZ", volume: "176.1M", spread: "3.4", atr: "4.25", regime: "DOWNTREND", momentum: "-1.20", liquidity: 40, rank: 74, score: "18.0", state: "BLOCKED", price: "0.082", change: "-2.66%" },
+];
 
-  return (
-    <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
-      <Sidebar />
-      <main className="page-main" style={{ flex: 1, minWidth: 0, maxWidth: 1560, margin: "0 auto" }}>
-        <div style={{ marginBottom: 18 }}>
-          <h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, margin: 0 }}>Coin Watch</h1>
-          <p style={{ color: "var(--muted)", fontSize: "var(--text-xs)", margin: "4px 0 0" }}>
-            One plain-English read per coin, refreshed once a day (~9 PM PH): 24h price action, what the agent is watching for, and free news sentiment.
-          </p>
-        </div>
+const stateClass: Record<Coin["state"], string> = { SHORTLISTED: "border-[#236448] bg-[#0b2a1c] text-[#45dd8a]", CANDIDATE: "border-[#66541b] bg-[#2b240d] text-[#e6c13e]", BENCHED: "border-[#23496e] bg-[#0c2743] text-[#55aef1]", BLOCKED: "border-[#64252d] bg-[#34151b] text-[#ff6167]" };
 
-        {error && <div style={{ color: "var(--red)", fontSize: "var(--text-sm)", marginBottom: 12 }}>{error}</div>}
+function CoinLogo({ symbol }: { symbol: string }) { return <span className="grid h-6 w-6 place-items-center rounded-full bg-[#182a39] text-[10px] font-bold text-[#d9e5ed]">{symbol.slice(0, 1)}</span>; }
 
-        {loading ? (
-          <Card><div style={{ padding: 32, textAlign: "center", color: "var(--muted)", fontSize: "var(--text-sm)" }}>Loading…</div></Card>
-        ) : digests.length > 0 ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
-            {digests.map((d, i) => (
-              <div key={d.symbol} className="rise-in" style={{ animationDelay: `${Math.min(i, 10) * 30}ms` }}>
-                <CoinDigestCard digest={d} />
-              </div>
-            ))}
-          </div>
-        ) : (
-          <Card><div style={{ padding: 32, textAlign: "center", color: "var(--muted)", fontSize: "var(--text-sm)" }}>
-            No digest yet — the agent builds one for every coin once a day, around 9 PM PH. Check back after the next run.
-          </div></Card>
-        )}
-      </main>
-    </div>
-  );
+function Detail({ coin, onClose }: { coin: Coin; onClose: () => void }) {
+  return <aside className="flex min-h-0 flex-col border-l border-[#1a303d] bg-[#050c12]"><div className="flex items-center justify-between border-b border-[#1a303d] px-4 py-3"><div className="flex items-center gap-2"><CoinLogo symbol={coin.symbol} /><div><div className="font-mono text-[13px] font-semibold">{coin.symbol} <span className="font-normal text-[#95a4ae]">/ USDT PERP</span></div><div className="text-[10px] text-[#8495a1]">Binance · Perpetual</div></div></div><button onClick={onClose} aria-label="Close coin details"><X size={18} /></button></div><div className="overflow-auto p-4 text-[11px]"><h3 className="mb-3 text-[10px] font-semibold tracking-[.1em] text-[#96a7b3]">OVERVIEW</h3><div className="grid grid-cols-2 gap-y-3"><div><span className="text-[#728493]">Price</span><strong className="mt-1 block font-mono text-[#dce5ed]">{coin.price}</strong></div><div><span className="text-[#728493]">Market Cap Rank</span><strong className="mt-1 block font-mono text-[#dce5ed]">{coin.rank}</strong></div><div><span className="text-[#728493]">24h Change</span><strong className="mt-1 block font-mono text-[#45dd8a]">{coin.change}</strong></div><div><span className="text-[#728493]">Market Cap</span><strong className="mt-1 block font-mono text-[#dce5ed]">1.32T USDT</strong></div><div><span className="text-[#728493]">24h Volume</span><strong className="mt-1 block font-mono text-[#dce5ed]">{coin.volume} USDT</strong></div><div><span className="text-[#728493]">Listed</span><strong className="mt-1 block font-mono text-[#dce5ed]">2017-09-14</strong></div><div><span className="text-[#728493]">Funding (8h)</span><strong className="mt-1 block font-mono text-[#dce5ed]">0.0102%</strong></div><div><span className="text-[#728493]">Pair Age (days)</span><strong className="mt-1 block font-mono text-[#dce5ed]">2,342</strong></div></div><section className="mt-5 border-t border-[#1a303d] pt-4"><h3 className="mb-3 text-[10px] font-semibold tracking-[.1em] text-[#96a7b3]">WHY IT PASSED CHEAP PREFILTER</h3>{["24h Volume ≥ 75M", "Spread (bps) ≤ 3.0", "ATR% (14d) ≤ 5.0", "USDT Perp Listing Age ≥ 7d", "Active On ≥ 2 Major Exchanges"].map((label) => <div key={label} className="flex items-center justify-between border-b border-[#12222d] py-2"><span className="flex items-center gap-2 text-[#c4d0d8]"><Check size={14} weight="bold" className="text-[#46dc85]" />{label}</span><span className="font-mono text-[#a6b5c0]">PASS</span></div>)}</section><section className="mt-5 border-t border-[#1a303d] pt-4"><h3 className="mb-3 text-[10px] font-semibold tracking-[.1em] text-[#96a7b3]">LATEST FULL-STACK EVALUATION <span className="font-normal tracking-normal">(10:13:50 UTC)</span></h3><div className="grid grid-cols-2 gap-3 text-[10px]"><div>Trend Regime<strong className="mt-1 block text-[#42da81]">{coin.regime}</strong></div><div>Quality Score<strong className="mt-1 block text-[#42da81]">86 / 100</strong></div><div>Momentum (z)<strong className="mt-1 block text-[#dbe5ed]">{coin.momentum}</strong></div><div>Risk Score<strong className="mt-1 block text-[#dbe5ed]">18 / 100</strong></div><div>Liquidity Score<strong className="mt-1 block text-[#dbe5ed]">{coin.liquidity} / 100</strong></div><div>Regime Alignment<strong className="mt-1 block text-[#42da81]">YES</strong></div><div>Volatility (ATR% 14D)<strong className="mt-1 block text-[#dbe5ed]">{coin.atr}%</strong></div><div>Shortlist Score<strong className="mt-1 block text-[#42da81]">{coin.score} / 100</strong></div></div></section><section className="mt-5 border-t border-[#1a303d] pt-4"><h3 className="mb-3 text-[10px] font-semibold tracking-[.1em] text-[#96a7b3]">GATE CHECK (TOP-TO-BOTTOM)</h3><div className="border border-[#1a303d]"><div className="grid grid-cols-[1fr_50px_1fr] border-b border-[#1a303d] bg-[#0a151d] px-2 py-2 text-[9px] text-[#8798a5]"><span>GATE</span><span>STATUS</span><span>DETAIL</span></div>{["Exchange / Listing", "Volume", "Spread", "Volatility", "Trend / Regime", "Momentum", "Liquidity", "Quality", "Risk"].map((gate) => <div key={gate} className="grid grid-cols-[1fr_50px_1fr] border-b border-[#142630] px-2 py-2 text-[10px]"><span>{gate}</span><span className="text-[#44db84]">PASS</span><span className="text-[#9daeba]">{gate === "Volume" ? `${coin.volume} > 75M` : gate === "Spread" ? `${coin.spread} bps ≤ 3.0` : gate === "Momentum" ? `${coin.momentum} ≥ -0.50` : "Within limits"}</span></div>)}</div></section><div className="mt-4 text-right text-[10px] text-[#7b8b97]">All values at 10:13:50 UTC <button className="ml-5 text-[#62b9ff]">↻ Refresh</button></div></div></aside>;
 }
 
-export default function Page() {
-  return (
-    <AuthGate>
-      <CoinWatchContent />
-    </AuthGate>
-  );
+const coinNav = [["Dashboard", HouseIcon], ["Market Regime", ChartLineUp], ["Coin Watch", EyeIcon], ["Shortlist", SlidersHorizontal], ["Signals", BroadcastIcon], ["Positions", ShoppingCartIcon], ["Trades", BookOpenIcon], ["Risk", ShieldIcon], ["Performance", ChartLineUp], ["Logs", Monitor], ["Config", GearSix]] as const;
+
+export default function CoinWatchPage() {
+  const [selected, setSelected] = useState(coins[0]);
+  const [query, setQuery] = useState("");
+  const [regime, setRegime] = useState("All");
+  const [showShortlisted, setShowShortlisted] = useState(false);
+  const [status, setStatus] = useState("All");
+  const visible = useMemo(() => coins.filter((coin) => (!query || coin.symbol.toLowerCase().includes(query.toLowerCase())) && (regime === "All" || coin.regime === regime) && (status === "All" || coin.state === status) && (!showShortlisted || coin.state === "SHORTLISTED")), [query, regime, status, showShortlisted]);
+  return <div className="min-h-screen min-w-[1530px] bg-[#03080d] text-[#dce5ed]"><aside className="fixed inset-y-0 left-0 flex w-[122px] flex-col border-r border-[#1a2d38] bg-[#061017]"><div className="flex h-[58px] items-center px-4 text-[17px] font-semibold">Trading<span className="text-[#3aa7ff]">AI</span></div><nav className="flex-1 py-2">{coinNav.map(([label, Icon]) => <div key={label} className={`flex h-10 items-center gap-2 border-l-2 px-4 text-[10px] ${label === "Coin Watch" ? "border-[#2d9cff] bg-[#12273a] text-[#68bcff]" : "border-transparent text-[#a7b5c0]"}`}><Icon size={16} />{label}</div>)}</nav><div className="border-t border-[#1a2d38] p-3 text-[10px] text-[#7c8f9d]">Help<br /><div className="mt-3 flex items-center gap-2 text-[#48dd87]"><i className="h-2 w-2 rounded-full bg-current" />Connected</div></div></aside><main className="ml-[122px] flex min-h-screen flex-col"><header className="flex h-[58px] items-center justify-between border-b border-[#1a2d38] px-5"><div><h1 className="text-[19px] font-semibold">Coin Watch</h1><p className="text-[10px] text-[#8395a2]">Full-market scanning & shortlist quality</p></div><div className="flex items-center gap-5 text-[10px] text-[#9caeba]"><span>◷ Last updated: 10:15:32 UTC</span><span className="text-[#45dd86]">● Scan engine: Healthy</span><GearSix size={17} /><span>Notifications <b className="rounded-full bg-[#287fff] px-1.5 py-0.5 text-white">3</b></span><span className="rounded-full border border-[#40505b] px-2 py-1">TA⌄</span></div></header><div className="grid grid-cols-[minmax(0,1fr)_388px] flex-1"><div className="min-w-0 p-2"><section className="grid grid-cols-7 border border-[#172d39] bg-[#0a151d]">{[["FULL MARKET UNIVERSE", "1,532", "USDT Perps Across Exchanges"], ["ELIGIBLE USDT PERPETUALS", "842", "After Exchange & Listing Filters"], ["CHEAP PREFILTER PASS", "178", "Liquidity, Spread, Volatility Screens"], ["FULL-STACK EVALUATED", "178", "Risk, Regime, Momentum, Quality"], ["SHORTLISTED", "28", "Meets All Gates"], ["LAST SCAN DURATION", "00:01:42", "Started 10:13:50 UTC"], ["NEXT SCAN", "00:03:18", "At 10:19:00 UTC"]].map(([label, value, note]) => <div key={label} className="border-r border-[#172d39] px-3 py-3 last:border-0"><div className="text-[9px] font-semibold tracking-[.09em] text-[#98a9b5]">{label}</div><div className={`mt-2 font-mono text-[20px] ${label === "SHORTLISTED" ? "text-[#42dc83]" : "text-[#dce5ed]"}`}>{value}</div><div className="mt-1 text-[9px] text-[#7d8f9c]">{note}</div></div>)}</section><div className="mt-3 flex items-center gap-2 border border-[#172d39] bg-[#071119] p-2"><label className="flex h-8 w-[170px] items-center gap-2 border border-[#293f4c] px-2 text-[10px] text-[#7e909e]"><MagnifyingGlass size={14} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search coin or symbol..." className="w-full bg-transparent outline-none" /></label><select value={regime} onChange={(e) => setRegime(e.target.value)} className="h-8 border border-[#293f4c] bg-[#0b171f] px-3 text-[10px]"><option>All</option><option>TRENDING UP</option><option>RANGING</option><option>DOWNTREND</option></select><select className="h-8 border border-[#293f4c] bg-[#0b171f] px-3 text-[10px]"><option>Any</option><option>50M+</option><option>500M+</option></select><select value={status} onChange={(e) => setStatus(e.target.value)} className="h-8 border border-[#293f4c] bg-[#0b171f] px-3 text-[10px]"><option>All</option><option>SHORTLISTED</option><option>CANDIDATE</option><option>BENCHED</option><option>BLOCKED</option></select><button onClick={() => setShowShortlisted(!showShortlisted)} className="ml-2 flex items-center gap-2 text-[10px] text-[#b4c2cc]"><span className={`h-4 w-7 rounded-full p-0.5 ${showShortlisted ? "bg-[#258fff]" : "bg-[#33414a]"}`}><i className={`block h-3 w-3 rounded-full bg-white transition-transform ${showShortlisted ? "translate-x-3" : ""}`} /></span>Show only shortlisted</button><button className="ml-auto flex h-8 items-center gap-2 border border-[#344b58] px-3 text-[10px]">▥ Columns</button><button className="h-8 border border-[#344b58] px-3 text-[10px]">Export CSV</button></div><section className="mt-2 overflow-hidden border border-[#172d39] bg-[#071119]"><table className="w-full border-collapse text-[10px]"><thead className="bg-[#0a161e] text-left text-[9px] font-semibold tracking-[.06em] text-[#8fa0ac]"><tr>{["#", "COIN", "24H VOLUME (USDT)", "SPREAD (BPS)", "ATR % (14D)", "TREND REGIME", "MOMENTUM (z)", "LIQUIDITY SCORE", "MKT CAP RANK", "SHORTLIST SCORE", "STATE", "LAST DECISION"].map((head) => <th key={head} className="border-b border-[#1b303c] px-2 py-3">{head}</th>)}</tr></thead><tbody>{visible.map((coin, index) => <tr key={coin.symbol} onClick={() => setSelected(coin)} className={`cursor-pointer border-b border-[#152833] hover:bg-[#0d202d] ${selected.symbol === coin.symbol ? "bg-[#0c2336] outline outline-1 outline-[#248ee8] outline-offset-[-1px]" : ""}`}><td className="px-2 py-2 text-[#82929d]">{index + 1}</td><td className="px-2 py-2"><span className="flex items-center gap-2 font-semibold"><CoinLogo symbol={coin.symbol} />{coin.symbol}</span></td><td className="px-2 py-2 font-mono">{coin.volume}</td><td className="px-2 py-2 font-mono">{coin.spread}</td><td className="px-2 py-2 font-mono">{coin.atr}</td><td className="px-2 py-2"><span className={`${coin.regime === "TRENDING UP" ? "bg-[#123b28] text-[#44dc83]" : coin.regime === "DOWNTREND" ? "bg-[#3a171d] text-[#ff5d65]" : "bg-[#3b310e] text-[#e9c83d]"} rounded px-1.5 py-1 text-[9px] font-semibold`}>{coin.regime}</span></td><td className={`px-2 py-2 font-mono ${coin.momentum.startsWith("-") ? "text-[#ff646c]" : "text-[#d9e5ed]"}`}>{coin.momentum}</td><td className="px-2 py-2 font-mono text-[#55d98a]">{coin.liquidity}</td><td className="px-2 py-2 font-mono">{coin.rank}</td><td className={`px-2 py-2 font-mono font-semibold ${Number(coin.score) >= 55 ? "text-[#efca3e]" : "text-[#e57468]"}`}>{coin.score}</td><td className="px-2 py-2"><span className={`rounded border px-1.5 py-1 text-[9px] font-semibold ${stateClass[coin.state]}`}>{coin.state}</span></td><td className="px-2 py-2 font-mono text-[#95a6b2]">10:13:50 <span className={coin.state === "BLOCKED" ? "text-[#ff5c64]" : "text-[#44dc83]"}>{coin.state === "BLOCKED" ? "BLOCKED" : "ADMITTED"}</span></td></tr>)}</tbody></table><div className="flex h-11 items-center justify-between px-3 text-[10px] text-[#81919e]"><span>Showing 1 to {visible.length} of 178 coins</span><span className="flex items-center gap-4">‹ <b className="rounded bg-[#113b61] px-3 py-2 text-[#6cbcff]">1</b> 2 3 4 5 ... 7 › <select className="ml-4 bg-transparent"><option>50</option></select></span></div></section></div><Detail coin={selected} onClose={() => setSelected(coins[0])} /></div></main></div>;
 }
+
+function HouseIcon(props: { size?: number }) { return <ChartLineUp {...props} />; }
+function EyeIcon(props: { size?: number }) { return <Monitor {...props} />; }
+function BroadcastIcon(props: { size?: number }) { return <ChartLineUp {...props} />; }
+function ShoppingCartIcon(props: { size?: number }) { return <SlidersHorizontal {...props} />; }
+function BookOpenIcon(props: { size?: number }) { return <Monitor {...props} />; }
+function ShieldIcon(props: { size?: number }) { return <GearSix {...props} />; }
