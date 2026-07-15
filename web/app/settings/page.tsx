@@ -1,17 +1,146 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, CheckCircle, GearSix, MagnifyingGlass, ShieldWarning, SlidersHorizontal, TelegramLogo, Warning } from "@phosphor-icons/react";
-import { api, AgentStatus } from "@/lib/api";
+import Link from "next/link";
+import { Bell, MagnifyingGlass, ShieldWarning, TelegramLogo, Warning } from "@phosphor-icons/react";
+import { api, AgentStatus, RosterInfo, StrategyProfile } from "@/lib/api";
 
-const sections = ["Trading Mode", "Exchange Connection", "Telegram Notifications", "Strategy Profile", "Scanner Settings", "Data & Time", "Services Health", "Danger Zone"];
 const services = ["Agent", "Exchange API", "Dashboard", "Database", "Nginx"];
 
-function Toggle({ on, setOn }: { on: boolean; setOn: (value: boolean) => void }) { return <button onClick={() => setOn(!on)} aria-label="Toggle" className={`h-5 w-9 rounded-full p-0.5 ${on ? "bg-[#40d879]" : "bg-[#40505a]"}`}><i className={`block h-4 w-4 rounded-full bg-white transition-transform ${on ? "translate-x-4" : ""}`} /></button>; }
-function Row({ icon, title, subtitle, children }: { icon: React.ReactNode; title: string; subtitle: string; children: React.ReactNode }) { return <section className="flex min-h-[92px] items-center gap-5 border-b border-[#20303a] px-7 py-5"><div className="grid w-9 place-items-center text-[#dce5ed]">{icon}</div><div className="w-[280px]"><h2 className="text-[14px] font-semibold text-[#e3eaf0]">{title}</h2><p className="mt-1 text-[11px] text-[#82929d]">{subtitle}</p></div><div className="flex flex-1 items-center justify-between gap-8">{children}</div></section>; }
+function Row({ icon, title, subtitle, children }: { icon: React.ReactNode; title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <section className="flex min-h-[92px] items-center gap-5 border-b border-[#20303a] px-7 py-5">
+      <div className="grid w-9 place-items-center text-[#dce5ed]">{icon}</div>
+      <div className="w-[280px]">
+        <h2 className="text-[14px] font-semibold text-[#e3eaf0]">{title}</h2>
+        <p className="mt-1 text-[11px] text-[#82929d]">{subtitle}</p>
+      </div>
+      <div className="flex flex-1 items-center justify-between gap-8">{children}</div>
+    </section>
+  );
+}
 
-function Nav() { return <aside className="fixed inset-y-0 left-0 flex w-[214px] flex-col border-r border-[#1a2b35] bg-[#050b10]"><div className="flex h-[70px] items-center gap-3 px-6 text-[20px] font-semibold">⌁ Trading<span className="text-[#60e08b]">AI</span></div><nav className="flex-1 py-4">{["Dashboard", "Markets", "Agents", "Scanners", "Portfolio", "Orders", "Analytics", "Logs", "Settings"].map((item) => <div key={item} className={`flex h-11 items-center gap-3 border-l-2 px-6 text-[12px] ${item === "Settings" ? "border-[#72e856] bg-[#17231f] font-semibold text-[#e9f4ed]" : "border-transparent text-[#aab7c1]"}`}><GearSix size={17} />{item}</div>)}</nav><div className="m-3 border border-[#263941] bg-[#081117] p-3 text-[10px] text-[#9dacb6]"><div className="text-[#cbd6dd]">DEPLOYMENT</div><div className="mt-2">Version <b className="float-right">v1.4.7</b></div><div className="mt-2">Deployed <b className="float-right">May 19, 2025</b></div><div className="mt-4 text-[#8b9ca7]">HEALTH CHECK <span className="float-right text-[#4ee080]">● Healthy</span></div></div><div className="border-t border-[#1a2b35] p-5 text-[11px] text-[#8697a2]">‹ Collapse</div></aside>; }
+export default function SettingsPage() {
+  const [halted, setHalted] = useState(false);
+  const [haltPending, setHaltPending] = useState(false);
+  const [agent, setAgent] = useState<AgentStatus | null>(null);
+  const [statusError, setStatusError] = useState(false);
+  const [roster, setRoster] = useState<RosterInfo | null>(null);
+  const [profile, setProfile] = useState<StrategyProfile | null>(null);
 
-export default function SettingsPage() { const [telegram, setTelegram] = useState([true, true, true, true, false]); const [halted, setHalted] = useState(false); const [profile, setProfile] = useState("Momentum Pro"); const [agent, setAgent] = useState<AgentStatus | null>(null); const [statusError, setStatusError] = useState(false); useEffect(() => { let active = true; const load = () => api.agentStatus().then((next) => { if (active) { setAgent(next); setStatusError(false); setHalted(Boolean(next.kill_switch_active)); } }).catch(() => active && setStatusError(true)); load(); const timer = window.setInterval(load, 10000); return () => { active = false; window.clearInterval(timer); }; }, []); return <div className="min-h-screen min-w-[1400px] bg-[#04090e] text-[#dce5ed]"><Nav /><main className="ml-[214px] flex min-h-screen flex-col"><header className="flex h-[70px] items-center justify-between border-b border-[#1a2b35] px-8"><div className="flex items-center gap-5"><span className="text-[#8394a0]">☰</span><h1 className="text-[22px] font-semibold">Settings</h1></div><div className="flex items-center gap-7 text-[11px]"><span>Environment <b className="ml-2 rounded bg-[#164d2d] px-2 py-1 text-[#6ee392]">{agent?.testnet === false ? "LIVE" : "TESTNET"}</b></span><span>Health <b className={statusError ? "ml-2 text-[#e4b63e]" : "ml-2 text-[#6ee392]"}>● {statusError ? "API UNAVAILABLE" : "ALL SYSTEMS OPERATIONAL"}</b></span><Bell size={18} /><span className="rounded-full border border-[#52606a] px-2 py-1">TA⌄</span></div></header><div className="flex min-h-0 flex-1"><aside className="w-[255px] border-r border-[#1a2b35] bg-[#071017] p-6"><h2 className="mb-5 text-[10px] font-semibold tracking-[.12em] text-[#a3b0b9]">SECTIONS</h2>{sections.map((item, i) => <div key={item} className={`flex h-10 items-center gap-4 border-l-2 px-3 text-[12px] ${i === 0 ? "border-[#7dec57] text-[#70e94e]" : "border-transparent text-[#b7c2c9]"}`}><span className="font-mono text-[#77e650]">{i + 1}</span>{item}</div>)}</aside><div className="min-w-0 flex-1 px-7"><Row icon={<ShieldWarning size={29} />} title="Trading Mode" subtitle="Choose the environment for order execution."><div className="flex h-11 w-[310px] border border-[#67d649]"><button className="flex-1 bg-[#173123] text-[13px] font-semibold text-[#70e94e]">TESTNET</button><button className="flex-1 text-[13px] text-[#7f8c94]">LIVE <span className="ml-2">▣</span></button></div><p className="w-[370px] text-[12px] text-[#9aa8b2]">Live mode is disabled.<br />Complete all safety checks to enable.</p></Row><Row icon={<span className="text-[30px] text-[#f0b52d]">◆</span>} title="Exchange Connection" subtitle="Manage your exchange API connection."><div className="flex flex-1 items-center gap-8 text-[12px]"><div><span className="block text-[#83939f]">Exchange</span><b>Binance <small className={`rounded px-2 py-1 ${agent?.exchange === "ok" ? "bg-[#164429] text-[#59dc81]" : "bg-[#3a2a12] text-[#e2b33d]"}`}>{agent?.exchange === "ok" ? "CONNECTED" : "CHECKING"}</small></b></div><div><span className="block text-[#83939f]">API Permissions</span><b>Spot: Trade, Read<br />Futures: Read</b></div><div><span className="block text-[#83939f]">IP Restriction</span><b className="text-[#58dd83]">Enabled ◇</b><br /><span>Whitelist IPs: 2</span></div><div><span className="block text-[#83939f]">API Credentials</span><b>Key: ************ ◉<br />Secret: ************ ◉</b></div></div><button className="border border-[#66757e] px-4 py-3 text-[11px]">Test Connection</button></Row><Row icon={<TelegramLogo size={30} weight="fill" color="#4ca9f0" />} title="Telegram Notifications" subtitle="Configure alerts and notifications."><div className="flex flex-1 justify-between text-center text-[10px] text-[#bdc8cf]">{["Trade Opened", "Trade Closed", "Daily Summary", "Risk / Agent Alerts", "Two-Way Conversation"].map((label, i) => <div key={label}><span className="mb-2 block">{label}</span><Toggle on={telegram[i]} setOn={(value) => setTelegram(telegram.map((x, j) => j === i ? value : x))} /></div>)}</div><button className="flex items-center gap-2 border border-[#66757e] px-4 py-3 text-[11px]"><TelegramLogo size={16} />Test Bot</button></Row><Row icon={<TargetIcon />} title="Strategy Profile" subtitle="Select the active strategy profile."><select value={profile} onChange={(e) => setProfile(e.target.value)} className="h-10 w-[310px] border border-[#566671] bg-[#0b151c] px-3 text-[13px]"><option>Momentum Pro</option><option>Baseline Simple</option><option>Full Agentic</option></select><button className="text-[12px] text-[#c0ccd3]">View / Edit Profiles ›</button></Row><Row icon={<MagnifyingGlass size={29} />} title="Scanner Settings" subtitle="Configure scanner schedule and output."><div className="flex gap-10 text-[12px]"><div><span className="block text-[#83939f]">Scan Schedule</span><b>Every 15 minutes　⌕</b></div><div><span className="block text-[#83939f]">Shortlist Size</span><b>20　⌕</b></div></div></Row><Row icon={<span className="text-[27px]">◷</span>} title="Data & Time" subtitle="Set timezone and data freshness."><div className="flex gap-14 text-[12px]"><div><span className="block text-[#83939f]">Timezone　⌕</span><b>UTC</b></div><div><span className="block text-[#83939f]">Data Freshness</span><b>Live (≤ 30s)　<span className="text-[#54dd80]">● Good</span></b></div></div></Row><Row icon={<span className="text-[25px]">⌁</span>} title="Services Health" subtitle="Real-time status of system services."><div className="flex flex-1 justify-between">{services.map((service) => <div key={service} className="text-center text-[11px]"><b className={agent && Object.values(agent).some((value) => value === "error") ? "text-[#ff646b]" : "text-[#55df82]"}>● {service}</b><span className="mt-1 block text-[#55df82]">{agent && Object.values(agent).some((value) => value === "error") ? "Check" : "Healthy"}</span></div>)}</div><button className="text-[12px]">View Logs ↗</button></Row><section className="flex min-h-[144px] items-center gap-5 border-t border-[#47272a] px-7 py-5"><Warning size={31} color="#ff555e" /><div className="w-[250px]"><h2 className="text-[14px] font-semibold text-[#ff686d]">Danger Zone</h2><p className="mt-1 text-[11px] text-[#8796a0]">Critical actions. Proceed with caution.</p></div><div className="flex flex-1 items-start gap-3"><button onClick={() => setHalted(!halted)} className="border border-[#d93643] px-4 py-3 text-[11px] text-[#ff6168]">Ⅱ {halted ? "Entries Halted" : "Halt New Entries"}</button><button className="border border-[#d93643] px-4 py-3 text-[11px] text-[#ff6168]">⊗ Close All Positions</button><button className="border border-[#d93643] px-4 py-3 text-[11px] text-[#ff6168]">◉ Kill Switch</button><div className="ml-auto w-[310px] border border-[#d93643] p-3 text-[11px]"><b className="text-[#ff6168]">Close All Positions</b><p className="mt-2 text-[#9aa8b1]">This will close all open positions at market.<br />This action cannot be undone.</p><div className="mt-3 flex gap-2"><input placeholder="Type CONFIRM to proceed" className="min-w-0 flex-1 border border-[#4c5960] bg-[#0c141a] px-2 py-2 text-[10px]" /><button className="bg-[#d93843] px-3 py-2 font-semibold">Confirm</button></div></div></div></section></div></div></main></div>; }
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      api.agentStatus().then((next) => { if (active) { setAgent(next); setStatusError(false); setHalted(Boolean(next.kill_switch_active)); } }).catch(() => active && setStatusError(true));
+      api.roster().then((next) => active && setRoster(next)).catch(() => {});
+      api.strategyProfile().then((next) => active && setProfile(next)).catch(() => {});
+    };
+    load();
+    const timer = window.setInterval(load, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
 
-function TargetIcon() { return <span className="grid h-7 w-7 place-items-center rounded-full border-2 border-[#dce5ed] text-[13px]">⊙</span>; }
+  const onHalt = () => {
+    setHaltPending(true);
+    api.setKillSwitch(!halted, !halted ? "Manual halt from settings" : "Manual resume from settings")
+      .then((res) => setHalted(res.kill_switch_active))
+      .catch(() => setStatusError(true))
+      .finally(() => setHaltPending(false));
+  };
+
+  const anyServiceError = agent ? Object.values(agent).some((value) => value === "error") : false;
+
+  return (
+    <div className="min-h-screen min-w-[1186px] bg-[#04090e] text-[#dce5ed]">
+      <main className="flex min-h-screen flex-col">
+        <header className="flex h-[70px] items-center justify-between border-b border-[#1a2b35] px-8">
+          <h1 className="text-[22px] font-semibold">Settings</h1>
+          <div className="flex items-center gap-7 text-[11px]">
+            <span>Environment <b className="ml-2 rounded bg-[#164d2d] px-2 py-1 text-[#6ee392]">{agent?.testnet === false ? "LIVE" : "TESTNET"}</b></span>
+            <span>Health <b className={statusError ? "ml-2 text-[#e4b63e]" : "ml-2 text-[#6ee392]"}>● {statusError ? "API UNAVAILABLE" : "ALL SYSTEMS OPERATIONAL"}</b></span>
+            <Bell size={18} />
+          </div>
+        </header>
+        <div className="min-w-0 flex-1 px-7">
+          <Row icon={<ShieldWarning size={29} />} title="Trading Mode" subtitle="Environment for order execution — set via server config, not switchable here.">
+            <div className="flex h-11 w-[310px] items-center border border-[#67d649] px-4 text-[13px] font-semibold text-[#70e94e]">
+              {agent?.testnet === false ? "LIVE" : "TESTNET"}
+            </div>
+            <p className="w-[370px] text-[12px] text-[#9aa8b2]">Switching modes requires a config change and restart on the server — not exposed here to avoid an accidental live-mode flip.</p>
+          </Row>
+          <Row icon={<span className="text-[30px] text-[#f0b52d]">◆</span>} title="Exchange Connection" subtitle="Live status of the exchange connection.">
+            <div className="flex flex-1 items-center gap-8 text-[12px]">
+              <div>
+                <span className="block text-[#83939f]">Exchange</span>
+                <b>{agent?.exchange === "ok" ? "Connected" : "Checking"} <small className={`rounded px-2 py-1 ${agent?.exchange === "ok" ? "bg-[#164429] text-[#59dc81]" : "bg-[#3a2a12] text-[#e2b33d]"}`}>{agent?.exchange === "ok" ? "OK" : "CHECKING"}</small></b>
+              </div>
+              <div>
+                <span className="block text-[#83939f]">Symbols tracked</span>
+                <b>{agent?.symbols?.length ?? "—"}</b>
+              </div>
+            </div>
+          </Row>
+          <Row icon={<TelegramLogo size={30} weight="fill" color="#4ca9f0" />} title="Telegram Notifications" subtitle="Alerts are configured via the server .env — not yet editable from this dashboard.">
+            <p className="flex-1 text-[12px] text-[#9aa8b2]">Trade open/close, CHoCH structure alerts, and daily summaries are sent per the bot&apos;s current config. To change what&apos;s sent, update the VPS <code>.env</code> directly.</p>
+          </Row>
+          <Row icon={<span className="grid h-7 w-7 place-items-center rounded-full border-2 border-[#dce5ed] text-[13px]">⊙</span>} title="Strategy Profile" subtitle="Active decision profile — see the Strategy page for full detail.">
+            <div className="flex flex-1 items-center gap-6 text-[12px]">
+              <div>
+                <span className="block text-[#83939f]">Active profile</span>
+                <b className="text-[14px] text-[#43aaff]">{profile?.profile ?? "—"}</b>
+              </div>
+              <div>
+                <span className="block text-[#83939f]">Decision-active modules</span>
+                <b>{profile?.decision_active?.length ?? "—"}</b>
+              </div>
+              <div>
+                <span className="block text-[#83939f]">Observe-only modules</span>
+                <b>{profile?.observe_only?.length ?? "—"}</b>
+              </div>
+            </div>
+            <Link href="/strategy" className="text-[12px] text-[#c0ccd3]">View on Strategy page ›</Link>
+          </Row>
+          <Row icon={<MagnifyingGlass size={29} />} title="Scanner Settings" subtitle="Live roster scan status.">
+            <div className="flex gap-10 text-[12px]">
+              <div>
+                <span className="block text-[#83939f]">Scan status</span>
+                <b>{roster?.scan?.status ?? "—"}</b>
+              </div>
+              <div>
+                <span className="block text-[#83939f]">Active roster size</span>
+                <b>{roster?.active?.length ?? "—"}</b>
+              </div>
+              <div>
+                <span className="block text-[#83939f]">Benched coins</span>
+                <b>{roster?.benched?.length ?? "—"}</b>
+              </div>
+            </div>
+          </Row>
+          <Row icon={<span className="text-[25px]">⌁</span>} title="Services Health" subtitle="Real-time status of system services.">
+            <div className="flex flex-1 justify-between">
+              {services.map((service) => (
+                <div key={service} className="text-center text-[11px]">
+                  <b className={anyServiceError ? "text-[#ff646b]" : "text-[#55df82]"}>● {service}</b>
+                  <span className="mt-1 block text-[#55df82]">{anyServiceError ? "Check" : "Healthy"}</span>
+                </div>
+              ))}
+            </div>
+            <Link href="/log" className="text-[12px] text-[#c0ccd3]">View Logs ↗</Link>
+          </Row>
+          <section className="flex min-h-[110px] items-center gap-5 border-t border-[#47272a] px-7 py-5">
+            <Warning size={31} color="#ff555e" />
+            <div className="w-[250px]">
+              <h2 className="text-[14px] font-semibold text-[#ff686d]">Danger Zone</h2>
+              <p className="mt-1 text-[11px] text-[#8796a0]">Critical actions. Proceed with caution.</p>
+            </div>
+            <div className="flex flex-1 items-start gap-3">
+              <button onClick={onHalt} disabled={haltPending} className="border border-[#d93643] px-4 py-3 text-[11px] text-[#ff6168] disabled:opacity-50">
+                Ⅱ {haltPending ? "Working…" : halted ? "Resume entries" : "Halt new entries"}
+              </button>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  );
+}

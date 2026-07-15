@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import AuthGate from "../components/AuthGate";
-import Sidebar from "../components/Sidebar";
 import { api } from "@/lib/api";
 import { Card } from "../components/ui";
 
@@ -64,7 +63,6 @@ function ChangelogContent() {
 
   return (
     <div className="app-shell" style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", display: "flex" }}>
-      <Sidebar />
       <main className="page-main" style={{ flex: 1, minWidth: 0, maxWidth: 760, margin: "0 auto" }}>
         <div style={{ marginBottom: 18 }}>
           <h1 style={{ fontSize: "var(--text-xl)", fontWeight: 700, margin: 0 }}>Changelog</h1>

@@ -1,40 +1,168 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChartBar, ChartLineUp, CheckCircle, GearSix, House, Receipt, ShieldCheck, ShoppingCart, Strategy, Warning } from "@phosphor-icons/react";
-import { api, RiskStatus, Summary, Validation } from "@/lib/api";
-
-type Row = { type: "OPEN" | "PENDING"; coin: string; side: "LONG" | "SHORT"; risk: string; bankroll: string; r: string; bucket: string; notional: string; leverage: string; protection: "ACTIVE" | "PLANNED" };
-
-const fallbackRows: Row[] = [
-  { type: "OPEN", coin: "BTCUSDT", side: "LONG", risk: "$612.40", bankroll: "2.41%", r: "1.28R", bucket: "BTC", notional: "$3,802.11 / $15,208.44", leverage: "4.00x", protection: "ACTIVE" },
-  { type: "OPEN", coin: "ETHUSDT", side: "LONG", risk: "$398.17", bankroll: "1.57%", r: "1.21R", bucket: "ETH", notional: "$2,114.75 / $8,459.01", leverage: "4.00x", protection: "ACTIVE" },
-  { type: "OPEN", coin: "SOLUSDT", side: "LONG", risk: "$241.33", bankroll: "0.95%", r: "1.05R", bucket: "SOL", notional: "$1,221.88 / $6,110.00", leverage: "5.00x", protection: "ACTIVE" },
-  { type: "OPEN", coin: "LINKUSDT", side: "SHORT", risk: "$183.72", bankroll: "0.72%", r: "1.11R", bucket: "ORACLE", notional: "$918.60 / $4,593.00", leverage: "5.00x", protection: "ACTIVE" },
-  { type: "OPEN", coin: "AVAXUSDT", side: "LONG", risk: "$306.59", bankroll: "1.21%", r: "1.16R", bucket: "L1", notional: "$1,533.20 / $7,666.00", leverage: "5.00x", protection: "ACTIVE" },
-  { type: "PENDING", coin: "ADAUSDT", side: "LONG", risk: "$241.50", bankroll: "0.95%", r: "1.00R", bucket: "L1", notional: "— / $3,864.00", leverage: "—", protection: "PLANNED" },
-  { type: "PENDING", coin: "MATICUSDT", side: "LONG", risk: "$167.20", bankroll: "0.66%", r: "1.00R", bucket: "L2", notional: "— / $2,675.00", leverage: "—", protection: "PLANNED" },
-  { type: "PENDING", coin: "DOGEUSDT", side: "SHORT", risk: "$152.60", bankroll: "0.60%", r: "1.00R", bucket: "MEME", notional: "— / $2,874.00", leverage: "—", protection: "PLANNED" },
-];
-
-const nav = [["Dashboard", House], ["Markets", ChartLineUp], ["Strategies", Strategy], ["Positions", ShoppingCart], ["Orders", Receipt], ["Signals", ChartLineUp], ["Backtests", ChartBar], ["Risk", ShieldCheck], ["Logs", Receipt], ["Reports", ChartLineUp], ["Settings", GearSix]] as const;
+import { Warning } from "@phosphor-icons/react";
+import { api, LivePosition, OpenPositionDetail, RiskStatus, Summary, Validation } from "@/lib/api";
 
 function money(value: number | null | undefined) { return value == null ? "—" : `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 function pct(value: number | null | undefined) { return value == null ? "—" : `${value.toFixed(2)}%`; }
-function Metric({ label, value, note, color = "text-[#dce6ed]" }: { label: string; value: string; note: string; color?: string }) { return <div className="border-r border-[#1b303d] px-4 py-3 last:border-0"><div className="text-[10px] text-[#9eacb7]">{label}</div><div className={`mt-2 font-mono text-[18px] ${color}`}>{value}</div><div className="mt-1 text-[10px] text-[#8495a1]">{note}</div></div>; }
+function shortSymbol(value: string) { return value.replace("/USDT:USDT", "").replace("/USDT", "").replace("USDT", ""); }
+
+function Metric({ label, value, note, color = "text-[#dce6ed]" }: { label: string; value: string; note: string; color?: string }) {
+  return (
+    <div className="border-r border-[#1b303d] px-4 py-3 last:border-0">
+      <div className="text-[10px] text-[#9eacb7]">{label}</div>
+      <div className={`mt-2 font-mono text-[18px] ${color}`}>{value}</div>
+      <div className="mt-1 text-[10px] text-[#8495a1]">{note}</div>
+    </div>
+  );
+}
+
+// Real bot policy thresholds (agent/config/settings.py risk_proven_*) — these
+// are hardcoded server-side constants, not exposed via API, but the meaning
+// is real: this is what the bot itself checks before it will scale up.
+const READINESS_TARGETS: { key: string; label: string; target: string }[] = [
+  { key: "min_days", label: "Minimum Trading Days", target: "30" },
+  { key: "min_trades", label: "Minimum Closed Trades", target: "50" },
+  { key: "expectancy", label: "Expectancy (after cost)", target: "≥ 0.10R" },
+  { key: "profit_factor", label: "Profit Factor", target: "≥ 1.3" },
+  { key: "drawdown", label: "Max Drawdown", target: "≤ 8.0%" },
+];
 
 export default function RiskPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [risk, setRisk] = useState<RiskStatus | null>(null);
   const [validation, setValidation] = useState<Validation | null>(null);
-  const [tab, setTab] = useState<"OPEN" | "PENDING">("OPEN");
+  const [details, setDetails] = useState<OpenPositionDetail[]>([]);
+  const [live, setLive] = useState<LivePosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const load = () => { setLoading(true); Promise.all([api.summary(), api.riskStatus(), api.validation()]).then(([s, r, v]) => { setSummary(s); setRisk(r); setValidation(v); setError(null); }).catch(() => setError("Live risk data unavailable — showing the last known mock snapshot.")).finally(() => setLoading(false)); };
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([api.summary(), api.riskStatus(), api.validation(), api.openPositionDetails(), api.livePositions()])
+      .then(([s, r, v, d, l]) => { setSummary(s); setRisk(r); setValidation(v); setDetails(d); setLive(l); setError(null); })
+      .catch(() => setError("Live risk data unavailable from the backend."))
+      .finally(() => setLoading(false));
+  };
   useEffect(() => { load(); const timer = window.setInterval(load, 10000); return () => window.clearInterval(timer); }, []);
-  const bankroll = risk?.effective_bankroll_usdt ?? summary?.bankroll_usdt ?? 25432.18;
-  const portfolioRisk = risk?.risk_pct ?? 6.84;
-  const dailyLoss = validation?.metrics.total_pnl_usdt != null && validation.metrics.total_pnl_usdt < 0 ? Math.abs(validation.metrics.total_pnl_usdt) : 486.32;
-  const rows = useMemo(() => fallbackRows.filter((row) => row.type === tab), [tab]);
-  return <div className="min-h-screen min-w-[1530px] bg-[#050b10] text-[#dce5ed]"><aside className="fixed inset-y-0 left-0 flex w-[191px] flex-col border-r border-[#1a2b35] bg-[#071118]"><div className="flex h-[70px] items-center gap-3 px-5 text-[21px] font-semibold"><span className="text-[#42d279]">✓</span>Trading<span className="text-[#36a4ff]">AI</span></div><nav className="flex-1 py-3">{nav.map(([label, Icon]) => <div key={label} className={`flex h-11 items-center gap-3 border-l-2 px-5 text-[12px] ${label === "Risk" ? "border-[#50da77] bg-[#15232a] text-[#e7f3ec]" : "border-transparent text-[#a9b8c3]"}`}><Icon size={18} />{label}</div>)}</nav><div className="border-t border-[#1a2b35] p-4 text-[11px] text-[#9aabb7]"><div className="mb-3 flex items-center gap-2 text-[#e2eaf0]">Strategy <span className="ml-auto">TrendScout v2⌄</span></div><div className="mb-4 flex items-center gap-2 text-[#e2eaf0]">Account <span className="ml-auto">TS-001⌄</span></div><div className="text-[#697d8b]">‹ Collapse</div></div></aside><main className="ml-[191px] flex min-h-screen flex-col"><header className="flex h-[72px] items-center justify-between border-b border-[#1a2b35] px-7"><div className="flex items-center gap-8"><div><span className="text-[12px] text-[#a0afb9]">Bankroll Basis</span><strong className="mt-2 block text-[14px]">TOTAL EQUITY ⓘ</strong></div><div><span className="text-[12px] text-[#a0afb9]">Exchange Equity</span><strong className="mt-2 block font-mono text-[14px]">{money(risk?.account_equity_usdt ?? bankroll)} <small className="font-sans text-[10px]">USD</small></strong></div></div><div><span className="text-[12px] text-[#a0afb9]">Environment</span><strong className="mt-2 block rounded bg-[#19522e] px-2 py-1 text-[11px] text-[#74e59a]">TESTNET</strong></div><div><span className="text-[12px] text-[#a0afb9]">Daily Reset (Exchange Time)</span><strong className="mt-2 block font-mono text-[14px]">13:00:00 UTC (05:00 ET)</strong></div></header><div className="p-5"><div className="mb-3 flex items-center justify-between text-[10px] text-[#7f909b]">{loading ? "Refreshing risk data…" : "Risk state updated just now"}<button onClick={load} className="text-[#61b9ff]">↻ Refresh</button></div>{error && <div className="mb-3 border border-[#765b20] bg-[#2a220f] px-3 py-2 text-[11px] text-[#eab83c]">{error}</div>}<section className="grid grid-cols-6 border border-[#1c303b] bg-[#0a151b]"><Metric label="Portfolio Risk (Amount at Risk)" value={`$${(bankroll * portfolioRisk / 100).toFixed(2)} / $5,000.00`} note={`${portfolioRisk.toFixed(1)}%`} /><Metric label="Same-Direction Risk (Long)" value="$682.53 / $2,500.00" note="27.3%" /><Metric label="Daily Realized Drawdown" value={`$-${dailyLoss.toFixed(2)} / $3,000.00`} note={`${(dailyLoss / 3000 * 100).toFixed(1)}%`} /><Metric label="Remaining Risk Capacity" value={`$${Math.max(0, 5000 - bankroll * portfolioRisk / 100).toFixed(2)} / $5,000.00`} note={`${Math.max(0, 100 - portfolioRisk).toFixed(1)}%`} /><Metric label="Open Slots" value={`${summary?.open_positions ?? 6} / 10`} note={`${((summary?.open_positions ?? 6) / 10 * 100).toFixed(0)}%`} /><Metric label="Kill-Switch" value={summary?.kill_switch_active ? "ACTIVE ⚠" : "ARMED ◇"} note="Auto-disable at Daily Loss Cap" color={summary?.kill_switch_active ? "text-[#ff646b]" : "text-[#49dc78]"} /></section><section className="mt-4 grid grid-cols-[minmax(0,1fr)_360px] gap-4"><div><div className="border border-[#1c303b] bg-[#071119]"><div className="flex h-12 items-center gap-6 border-b border-[#1c303b] px-4 text-[12px]"><span className="font-semibold">RISK BUDGET ALLOCATION</span><button onClick={() => setTab("OPEN")} className={`py-4 ${tab === "OPEN" ? "border-b-2 border-[#4ddd7a] text-[#e8f5ed]" : "text-[#8798a4]"}`}>Open Positions (5)</button><button onClick={() => setTab("PENDING")} className={`py-4 ${tab === "PENDING" ? "border-b-2 border-[#e0b536] text-[#f0d26b]" : "text-[#8798a4]"}`}>Pending Candidates (3)</button></div><div className="overflow-hidden"><table className="w-full border-collapse text-[11px]"><thead className="bg-[#0a151c] text-left text-[9px] text-[#8fa0ad]"><tr>{["TYPE", "COIN", "SIDE", "RISK $ (Amount at Risk)", "% BANKROLL", "R (Initial)", "CORRELATION BUCKET", "MARGIN / NOTIONAL", "LEVERAGE (Effective)", "PROTECTION STATUS"].map((h) => <th key={h} className="border-b border-[#1b303d] px-3 py-3 font-medium">{h}</th>)}</tr></thead><tbody>{rows.map((row) => <tr key={row.coin} className="border-b border-[#152832]"><td className="px-3 py-3"><span className={`rounded px-1.5 py-1 text-[9px] ${row.type === "OPEN" ? "bg-[#164229] text-[#54dd88]" : "bg-[#574512] text-[#f1ca47]"}`}>{row.type}</span></td><td className="px-3 py-3 font-mono font-semibold">{row.coin}</td><td className={`px-3 py-3 font-semibold ${row.side === "LONG" ? "text-[#43da80]" : "text-[#ff5f68]"}`}>{row.side}</td><td className="px-3 py-3 font-mono">{row.risk}</td><td className="px-3 py-3 font-mono">{row.bankroll}</td><td className="px-3 py-3 font-mono">{row.r}</td><td className="px-3 py-3 text-[#aab8c1]">{row.bucket}</td><td className="px-3 py-3 font-mono">{row.notional}</td><td className="px-3 py-3 font-mono">{row.leverage}</td><td className="px-3 py-3"><span className={`rounded px-1.5 py-1 text-[9px] ${row.protection === "ACTIVE" ? "bg-[#164229] text-[#54dd88]" : "bg-[#574512] text-[#f1ca47]"}`}>{row.protection}</span></td></tr>)}</tbody><tfoot><tr><td colSpan={3} className="px-3 py-4 text-[#b5c2ca]">Totals ({tab === "OPEN" ? "Open" : "Pending"})</td><td className="font-mono">{tab === "OPEN" ? "$1,742.21" : "$561.30"}</td><td className="font-mono">{tab === "OPEN" ? "6.86%" : "2.21%"}</td><td colSpan={5} className="px-3 text-right text-[10px] text-[#7b8d99]">Correlation buckets are user-defined and used for same-direction risk controls.</td></tr></tfoot></table></div></div><section className="mt-4 border border-[#1c303b] bg-[#071119] p-4"><div className="mb-4 flex items-center gap-3"><h2 className="text-[13px] font-semibold">30-DAY VALIDATION REQUIREMENTS</h2><span className="rounded bg-[#17442a] px-2 py-1 text-[10px] text-[#55dd88]">TESTNET</span><span className="ml-auto text-[10px] text-[#a2b2bc]">Validation is based on 30 rolling days from today</span></div><div className="grid grid-cols-[1fr_80px_80px_260px_110px] border-b border-[#1b303d] pb-2 text-[9px] text-[#8fa0ad]"><span>REQUIREMENT</span><span>TARGET</span><span>CURRENT</span><span>PROGRESS</span><span>STATUS</span></div>{[["Minimum Trading Days", "20", String(validation?.metrics.days ?? 11), "55%", "IN PROGRESS"], ["Minimum Closed Trades", "60", String(validation?.metrics.closed_count ?? 28), "47%", "IN PROGRESS"], ["Max Daily Loss (Realized)", "≤ $3,000.00", money(dailyLoss), `${(dailyLoss / 3000 * 100).toFixed(1)}%`, "PASS"], ["Rule Violations", "0", "0", "0%", "PASS"], ["Data Integrity", "100%", "100%", "100%", "PASS"]].map((row) => <div key={row[0]} className="grid grid-cols-[1fr_80px_80px_260px_110px] items-center border-b border-[#142630] py-3 text-[11px]"><span>{row[0]}</span><span className="font-mono text-[#aebbc4]">{row[1]}</span><span className="font-mono text-[#aebbc4]">{row[2]}</span><span><span className="mr-3 inline-block h-2 w-[135px] bg-[#27353b]"><i className={`block h-full ${row[4] === "PASS" ? "bg-[#4bda79]" : "bg-[#e1a72f]"}`} style={{ width: row[3] }} /></span>{row[3]}</span><span className={row[4] === "PASS" ? "text-[#50dc80]" : "text-[#e7b538]"}>{row[4]}</span></div>)}</section></div><aside className="border border-[#1c303b] bg-[#071119]"><div className="border-b border-[#1c303b] px-4 py-4 text-[12px] font-semibold">RISK CONFIGURATION <span className="float-right text-[#8b9ba6]">Read Only 🔒</span></div>{[["Per-Trade Risk (Amount at Risk)", "$250.00", "0.98% of Bankroll"], ["Portfolio Risk Cap (Amount at Risk)", "$5,000.00", "19.64% of Bankroll"], ["Correlated Direction Cap", "$2,500.00", "9.82% of Bankroll"], ["Daily Loss Cap (Realized)", "$3,000.00", "11.79% of Bankroll"], ["Max Hold Time", "24h", "Hard exit at limit"], ["Risk Tier", risk?.tier?.toUpperCase() ?? "MODERATE", "Limits set for this tier"]].map(([label, value, note]) => <div key={label} className="border-b border-[#162731] px-4 py-4"><div className="text-[11px] text-[#b9c5cc]">{label}</div><strong className="mt-2 block font-mono text-[14px]">{value}</strong><small className="mt-1 block text-[10px] text-[#7f909c]">{note}</small></div>)}<div className="m-3 border border-[#73312e] bg-[#281417] p-3"><div className="flex items-center gap-2 text-[11px] font-semibold text-[#ff706a]"><Warning size={15} />CROSS MARGIN ENABLED</div><p className="mt-2 text-[10px] leading-4 text-[#c3a5a4]">A single position&apos;s loss can affect the entire account. Amount at Risk assumes current stop levels hold.</p></div><div className="m-3 border border-[#765b20] bg-[#2a220f] p-3"><div className="flex items-center gap-2 text-[11px] font-semibold text-[#eab83c]"><Warning size={15} />ESTIMATED FEES & SLIPPAGE (OPEN POSITIONS)</div><div className="mt-3 flex justify-between text-[10px]"><span>Est. Exit Fees</span><b>$27.48</b></div><div className="mt-2 flex justify-between text-[10px]"><span>Est. Slippage (0.10%)</span><b>$32.11</b></div><div className="mt-2 flex justify-between border-t border-[#4f411e] pt-2 text-[10px]"><span>Total Est. Cost to Exit</span><b>$59.59 (0.23%)</b></div><p className="mt-3 text-[9px] text-[#aa986f]">Estimates update with market moves.</p></div></aside></section></div><footer className="flex h-9 items-center justify-between border-t border-[#1a2b35] px-7 text-[10px] text-[#778995]"><span>Last updated: {new Date().toISOString().slice(0, 19).replace("T", " ")} UTC</span><span className="text-[#45db80]">↻ Auto-refresh: 10s ⚙</span></footer></main></div>;
+
+  const bankroll = risk?.effective_bankroll_usdt ?? summary?.bankroll_usdt ?? 0;
+  const portfolioRiskPct = risk?.risk_pct ?? 0;
+
+  const rows = useMemo(() => {
+    const marks = new Map(live.map((p) => [shortSymbol(p.symbol), p]));
+    return details.map((item) => {
+      const t = item.trade;
+      const symbol = shortSymbol(t.symbol);
+      const mark = marks.get(symbol);
+      const riskUsdt = Math.abs(t.entry_price - t.stop_loss) * t.qty;
+      const riskBankrollPct = bankroll > 0 ? (riskUsdt / bankroll) * 100 : 0;
+      const notional = mark?.mark_price != null ? t.qty * mark.mark_price : null;
+      return { id: t.id, symbol: t.symbol, side: t.side.toUpperCase(), riskUsdt, riskBankrollPct, notional, strategy: t.strategy_name };
+    });
+  }, [details, live, bankroll]);
+
+  const totalRiskUsdt = rows.reduce((sum, r) => sum + r.riskUsdt, 0);
+  const totalRiskPct = bankroll > 0 ? (totalRiskUsdt / bankroll) * 100 : 0;
+
+  const readinessChecks = validation?.readiness.checks ?? {};
+  const readinessFailed = new Set(validation?.readiness.failed ?? []);
+
+  return (
+    <div className="min-h-screen min-w-[1150px] bg-[#050b10] text-[#dce5ed]">
+      <main className="flex min-h-screen flex-col">
+        <header className="flex h-[72px] items-center justify-between border-b border-[#1a2b35] px-7">
+          <div className="flex items-center gap-8">
+            <div>
+              <span className="text-[12px] text-[#a0afb9]">Bankroll Basis</span>
+              <strong className="mt-2 block text-[14px]">TOTAL EQUITY</strong>
+            </div>
+            <div>
+              <span className="text-[12px] text-[#a0afb9]">Exchange Equity</span>
+              <strong className="mt-2 block font-mono text-[14px]">{money(risk?.account_equity_usdt ?? bankroll)} <small className="font-sans text-[10px]">USD</small></strong>
+            </div>
+          </div>
+          <div>
+            <span className="text-[12px] text-[#a0afb9]">Risk Tier</span>
+            <strong className="mt-2 block rounded bg-[#19522e] px-2 py-1 text-[11px] text-[#74e59a]">{risk?.tier?.toUpperCase() ?? "—"}</strong>
+          </div>
+        </header>
+        <div className="p-5">
+          <div className="mb-3 flex items-center justify-between text-[10px] text-[#7f909b]">
+            {loading ? "Refreshing risk data…" : "Risk state updated just now"}
+            <button onClick={load} className="text-[#61b9ff]">↻ Refresh</button>
+          </div>
+          {error && <div className="mb-3 border border-[#765b20] bg-[#2a220f] px-3 py-2 text-[11px] text-[#eab83c]">{error}</div>}
+          <section className="grid grid-cols-4 border border-[#1c303b] bg-[#0a151b]">
+            <Metric label="Portfolio Risk (Amount at Risk)" value={money(totalRiskUsdt)} note={`${pct(totalRiskPct)} of bankroll`} />
+            <Metric label="Current Drawdown" value={pct(risk?.drawdown_pct)} note={risk?.reason ?? "—"} />
+            <Metric label="Open Positions" value={String(summary?.open_positions ?? rows.length)} note="live count" />
+            <Metric label="Kill-Switch" value={summary?.kill_switch_active ? "ACTIVE ⚠" : "ARMED ◇"} note="Auto-disable at daily loss cap" color={summary?.kill_switch_active ? "text-[#ff646b]" : "text-[#49dc78]"} />
+          </section>
+          <section className="mt-4 border border-[#1c303b] bg-[#071119]">
+            <div className="flex h-12 items-center border-b border-[#1c303b] px-4 text-[12px]">
+              <span className="font-semibold">OPEN POSITIONS ({rows.length})</span>
+            </div>
+            <div className="overflow-hidden">
+              <table className="w-full border-collapse text-[11px]">
+                <thead className="bg-[#0a151c] text-left text-[9px] text-[#8fa0ad]">
+                  <tr>{["COIN", "SIDE", "STRATEGY", "RISK $ (AT STOP)", "% BANKROLL", "NOTIONAL"].map((h) => <th key={h} className="border-b border-[#1b303d] px-3 py-3 font-medium">{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {rows.length ? rows.map((row) => (
+                    <tr key={row.id} className="border-b border-[#152832]">
+                      <td className="px-3 py-3 font-mono font-semibold">{row.symbol}</td>
+                      <td className={`px-3 py-3 font-semibold ${row.side === "LONG" ? "text-[#43da80]" : "text-[#ff5f68]"}`}>{row.side}</td>
+                      <td className="px-3 py-3 text-[#aab8c1]">{row.strategy}</td>
+                      <td className="px-3 py-3 font-mono">{money(row.riskUsdt)}</td>
+                      <td className="px-3 py-3 font-mono">{pct(row.riskBankrollPct)}</td>
+                      <td className="px-3 py-3 font-mono">{row.notional != null ? money(row.notional) : "—"}</td>
+                    </tr>
+                  )) : <tr><td colSpan={6} className="px-3 py-6 text-center text-[#7b8d99]">No open positions.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section className="mt-4 border border-[#1c303b] bg-[#071119] p-4">
+            <div className="mb-4 flex items-center gap-3">
+              <h2 className="text-[13px] font-semibold">READINESS FOR LIVE TRADING</h2>
+              <span className={`rounded px-2 py-1 text-[10px] ${validation?.readiness.ready ? "bg-[#17442a] text-[#55dd88]" : "bg-[#3a2a12] text-[#e2b33d]"}`}>{validation?.readiness.ready ? "READY" : "NOT READY"}</span>
+            </div>
+            <div className="grid grid-cols-[1fr_100px_100px_120px] border-b border-[#1b303d] pb-2 text-[9px] text-[#8fa0ad]">
+              <span>REQUIREMENT</span><span>TARGET</span><span>CURRENT</span><span>STATUS</span>
+            </div>
+            {READINESS_TARGETS.map((req) => {
+              const known = validation != null && req.key in readinessChecks;
+              const passed = known ? readinessChecks[req.key] : null;
+              const current =
+                req.key === "min_days" ? String(validation?.metrics.days ?? "—") :
+                req.key === "min_trades" ? String(validation?.metrics.closed_count ?? "—") :
+                req.key === "expectancy" ? `${validation?.metrics.expectancy_after_estimated_cost_r?.toFixed(2) ?? "—"}R` :
+                req.key === "profit_factor" ? (validation?.metrics.profit_factor?.toFixed(2) ?? "—") :
+                req.key === "drawdown" ? pct(validation?.metrics.max_drawdown_pct) : "—";
+              return (
+                <div key={req.key} className="grid grid-cols-[1fr_100px_100px_120px] items-center border-b border-[#142630] py-3 text-[11px]">
+                  <span>{req.label}</span>
+                  <span className="font-mono text-[#aebbc4]">{req.target}</span>
+                  <span className="font-mono text-[#aebbc4]">{current}</span>
+                  <span className={passed === true ? "text-[#50dc80]" : passed === false ? "text-[#e7b538]" : "text-[#7b8d99]"}>{passed === true ? "PASS" : passed === false ? "IN PROGRESS" : "—"}</span>
+                </div>
+              );
+            })}
+          </section>
+          {!validation?.readiness.ready && readinessFailed.size > 0 && (
+            <section className="mt-4 border border-[#765b20] bg-[#2a220f] p-4">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-[#eab83c]"><Warning size={15} />Blocking readiness checks</div>
+              <ul className="text-[11px] text-[#c9b98a]">{Array.from(readinessFailed).map((f) => <li key={f}>· {f}</li>)}</ul>
+            </section>
+          )}
+        </div>
+        <footer className="mt-auto flex h-9 items-center justify-between border-t border-[#1a2b35] px-7 text-[10px] text-[#778995]">
+          <span>Last updated: {new Date().toISOString().slice(0, 19).replace("T", " ")} UTC</span>
+          <span className="text-[#45db80]">↻ Auto-refresh: 10s</span>
+        </footer>
+      </main>
+    </div>
+  );
 }

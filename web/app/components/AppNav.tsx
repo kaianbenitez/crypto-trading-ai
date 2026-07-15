@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Broadcast, ChartLineUp, Eye, Gauge, GearSix, ShieldWarning } from "@phosphor-icons/react";
+import { BookOpen, Broadcast, ChartLineUp, ClockCounterClockwise, Eye, Gauge, GearSix, ShieldWarning, Sparkle } from "@phosphor-icons/react";
 
 const items = [
   ["Dashboard", "/", Gauge],
@@ -11,6 +11,8 @@ const items = [
   ["Coin Watch", "/coins", Eye],
   ["Risk", "/risk", ShieldWarning],
   ["Strategy", "/strategy", ChartLineUp],
+  ["Adaptive", "/adaptive", Sparkle],
+  ["Changelog", "/changelog", ClockCounterClockwise],
   ["Settings", "/settings", GearSix],
 ] as const;
 

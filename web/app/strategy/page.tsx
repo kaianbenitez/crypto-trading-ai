@@ -1,18 +1,142 @@
 "use client";
 
-import { useState } from "react";
-import { ChartLineUp, CheckCircle, Circle, DownloadSimple, GearSix } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
+import { CheckCircle, Circle } from "@phosphor-icons/react";
+import { api, StrategyOverview } from "@/lib/api";
 
-const pipeline = [
-  ["Market Universe", "Symbols considered", "Top 300 by 24h Vol (USDT pairs)", "ACTIVE"], ["Cheap Prefilter", "Volatility & liquidity screen", "ATR(14) / Price ≥ 0.20%    Spread ≤ 0.15%", "ACTIVE"], ["Indicator Setup", "Base indicators", "EMA 20/50/200, RSI(14), ATR(14), ADX(14), Volume SMA(20)", "ACTIVE"], ["Regime Selection", "Market regime filter", "ADX(14) ≥ 20 → Trend    ADX(14) < 20 → Range", "ACTIVE"], ["MTF Confluence", "Higher timeframe alignment", "Trend: 1h + 4h EMA200 slope ↑    Range: 1h within 4h range", "ACTIVE"], ["Cost / Edge Gates", "Fees, spread, slippage, edge", "Est. Cost ≤ 0.25%    Min Edge ≥ 0.30%", "ACTIVE"], ["Re-entry Guard", "Cooldown & anti-churn", "Cooldown: 2 candles    Max 1 entry per direction", "ACTIVE"], ["Ranked Admission", "Score & rank candidates", "Min Score ≥ 65 / 100    Top N = 20", "ACTIVE"], ["Position Sizing", "Size by risk & confidence", "Risk %: 1.00%    Kelly Cap: 0.75x", "ACTIVE"], ["Protection Setup", "Initial stop & structure", "Initial Stop: 1.20 × ATR(14) (Swing)    Structure: Swing", "ACTIVE"], ["Exit Management", "TP, trailing, time exit", "TP1: 1.5R (50%)    TP2: 3.0R (50%)", "ACTIVE"], ["Emergency / Kill Switch", "Risk circuit breakers", "Daily Loss Limit: OFF    Max Drawdown Limit: OFF", "DISABLED"],
-];
-const modules = [["SMC Module", "Structure & Order Blocks", "OBSERVE ONLY", "ACTIVE", "+7.6%"], ["News Impact", "Event risk filter", "OBSERVE ONLY", "ACTIVE", "+4.1%"], ["Memory Module", "Outcome & pattern memory", "OBSERVE ONLY", "ACTIVE", "+6.3%"], ["Adaptive Weights", "Dynamic model weighting", "OBSERVE ONLY", "ACTIVE", "+5.8%"], ["Coin Brain", "Per-asset intelligence", "OBSERVE ONLY", "ACTIVE", "+4.7%"], ["Market-Context Penalty", "Chop / risk-off penalty", "ACTIVE", "ACTIVE", "+9.3%"]];
-const gates = [["Market Universe", "74,212", "—", "100%", "+0.00%"], ["Cheap Prefilter", "18,946", "55,266", "25.6%", "+0.71%"], ["Indicator Setup", "18,946", "0", "100%", "+0.00%"], ["Regime Selection", "18,946", "0", "100%", "+0.00%"], ["MTF Confluence", "8,732", "10,214", "46.1%", "+0.38%"], ["Cost / Edge Gates", "6,215", "2,517", "71.1%", "+0.29%"], ["Re-entry Guard", "5,281", "934", "84.9%", "+0.06%"], ["Ranked Admission", "3,116", "2,165", "59.0%", "+0.32%"]];
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border border-[#1b303d] bg-[#071017] p-3">
+      <h2 className="border-b border-[#1b303d] pb-3 text-[11px] font-semibold tracking-[.08em] text-[#a9b7c2]">{title}</h2>
+      <div className="pt-3">{children}</div>
+    </section>
+  );
+}
 
-function Nav() { const items = ["Overview", "Markets", "Positions", "Orders", "Strategy", "Backtest", "Analytics", "Logs", "Alerts", "Settings"]; return <aside className="fixed inset-y-0 left-0 flex w-[134px] flex-col border-r border-[#1b2d38] bg-[#050b10]"><div className="flex h-[58px] items-center gap-2 px-4 text-[17px] font-semibold">✧ Trading<span className="text-[#3ca9ff]">AI</span></div><nav className="flex-1 py-2">{items.map((item) => <div key={item} className={`flex h-11 items-center gap-3 border-l-2 px-4 text-[11px] ${item === "Strategy" ? "border-[#258fff] bg-[#102a40] text-[#6ebcff]" : "border-transparent text-[#aab7c2]"}`}><ChartLineUp size={17} />{item}</div>)}</nav><div className="border-t border-[#1b2d38] p-3 text-[10px] text-[#8394a0]">Collapse<br /><div className="mt-3 flex items-center gap-2 text-[#49dd87]"><i className="h-2 w-2 rounded-full bg-current" />Connected</div></div></aside>; }
+function KV({ label, value }: { label: string; value: React.ReactNode }) {
+  return <><span className="text-[#83939f]">{label}</span><span>{value}</span></>;
+}
 
-function Pipeline() { return <section className="border border-[#1b303d] bg-[#071017]"><div className="flex h-10 items-center justify-between border-b border-[#1b303d] px-3"><h2 className="text-[11px] font-semibold tracking-[.08em] text-[#a9b7c2]">DECISION PIPELINE <span className="font-normal tracking-normal">(Top → Bottom / Execution)</span></h2><span className="text-[10px] text-[#8b9ba7]">STATUS <span className="ml-28">LIVE THRESHOLD / SETTING</span></span></div>{pipeline.map(([name, sub, setting, state], i) => <div key={name} className="grid min-h-[43px] grid-cols-[34px_245px_100px_1fr_22px] items-center border-b border-[#172a35] px-3 text-[10px]"><span className="grid h-6 w-6 place-items-center rounded-full bg-[#174a78] font-mono text-[12px] font-semibold text-[#dff2ff]">{i + 1}</span><div><strong className="block text-[11px] text-[#d8e3eb]">{name}</strong><span className="text-[#82929f]">{sub}</span></div><span className={`w-fit rounded border px-2 py-1 text-[9px] font-semibold ${state === "DISABLED" ? "border-[#47525a] text-[#8a989f]" : "border-[#238ee8] text-[#5db7ff]"}`}>{state}</span><span className="font-mono text-[#afbdc7]">{setting}</span><span className="text-[#82929f]">⌄</span></div>)}</section>; }
+export default function StrategyPage() {
+  const [strategy, setStrategy] = useState<StrategyOverview | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-function ProfileComparison() { return <section className="border border-[#1b303d] bg-[#071017]"><div className="flex h-10 items-center justify-between border-b border-[#1b303d] px-3"><h2 className="text-[11px] font-semibold tracking-[.08em] text-[#a9b7c2]">PROFILE COMPARISON</h2><label className="flex items-center gap-2 text-[10px] text-[#93a4b0]">Show All Deltas <span className="h-4 w-7 rounded-full bg-[#258fff] p-0.5"><i className="ml-3 block h-3 w-3 rounded-full bg-white" /></span></label></div><div className="grid grid-cols-[1.1fr_1fr_1fr_1fr_.55fr_.55fr] text-[10px]"><div className="contents text-[#8898a5]"><div className="border-b border-[#1b303d] p-3">MODULE</div><div className="border-b border-[#1b303d] p-3">BASELINE_SIMPLE<br />(Active)</div><div className="border-b border-[#1b303d] bg-[#0a2740] p-3 text-[#5bb8ff]">CURRENT PROFILE<br />(baseline_simple)</div><div className="border-b border-[#1b303d] p-3 text-[#9fceff]">FULL_AGENTIC</div><div className="border-b border-[#1b303d] p-3 text-[#d6a934]">OBSERVED Δ</div><div className="border-b border-[#1b303d] p-3 text-[#51aaff]">APPLIED Δ</div></div>{modules.map(([name, sub, base, full, delta]) => <div key={name} className="contents"><div className="border-b border-[#172a35] p-3"><strong className="block text-[#cdd8e0]">{name}</strong><span className="text-[#7f909d]">{sub}</span></div><div className="border-b border-[#172a35] p-3 text-[#e5b82f]">{base}<br /><span className="text-[#8797a2]">Weight: {base === "ACTIVE" ? "10%" : "0%"}</span></div><div className="border-b border-[#172a35] bg-[#0a2740] p-3 text-[#e5b82f]">{base}<br /><span className="text-[#8797a2]">Weight: {base === "ACTIVE" ? "10%" : "0%"}</span></div><div className="border-b border-[#172a35] p-3 text-[#4aa8ff]">{full}<br /><span className="text-[#8797a2]">Weight: 18%</span></div><div className="border-b border-[#172a35] p-3 text-[#e4b42b]">{delta}</div><div className="border-b border-[#172a35] p-3 text-[#4aa8ff]">0%</div></div>)}</div><div className="flex gap-5 px-3 py-3 text-[10px] text-[#9aaab5]"><span className="text-[#55b8ff]">● ACTIVE <small>Actively influences decisions</small></span><span className="text-[#eab52e]">● OBSERVE ONLY <small>Data collected, not used in decisions</small></span><span>● DISABLED <small>Not running</small></span></div></section>; }
+  useEffect(() => {
+    let active = true;
+    const load = () => api.strategy().then((s) => active && setStrategy(s)).catch(() => active && setError("Could not load strategy config from the backend."));
+    load();
+    const timer = window.setInterval(load, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
 
-export default function StrategyPage() { const [active, setActive] = useState("baseline_simple"); return <div className="min-h-screen min-w-[1500px] bg-[#03080d] text-[#dce5ed]"><Nav /><main className="ml-[134px] px-4 py-3"><header className="flex items-center justify-between"><div className="flex items-center gap-3"><h1 className="text-[21px] font-semibold">Strategy</h1><span className="text-[10px] text-[#82929e]">Live strategy documentation & control</span></div><div className="flex gap-2"><button className="flex items-center gap-2 border border-[#354957] bg-[#0a141b] px-3 py-2 text-[10px]"><DownloadSimple size={14} />Export</button><button className="border border-[#354957] bg-[#0a141b] px-3 py-2 text-[10px]">View as JSON</button></div></header><section className="mt-3 grid grid-cols-5 border border-[#1b303d] bg-[#071017]"><div className="border-r border-[#1b303d] p-3"><span className="text-[9px] text-[#8999a5]">ACTIVE PROFILE</span><strong className="mt-1 block text-[15px] text-[#43aaff]">{active}</strong></div><div className="border-r border-[#1b303d] p-3"><span className="text-[9px] text-[#8999a5]">CONFIG / CODE SYNC</span><strong className="mt-1 block text-[13px] text-[#45dd87]">● In Sync <small className="text-[#a7b6c0]">v1.18.7 ✓</small></strong></div><div className="border-r border-[#1b303d] p-3"><span className="text-[9px] text-[#8999a5]">TIMEFRAME (CANDLE)</span><strong className="mt-1 block text-[14px]">♮ 1h</strong></div><div className="border-r border-[#1b303d] p-3"><span className="text-[9px] text-[#8999a5]">SCAN INTERVAL</span><strong className="mt-1 block text-[14px]">〽 5m</strong></div><div className="p-3"><span className="text-[9px] text-[#8999a5]">LAST STRATEGY RELOAD</span><strong className="mt-1 block text-[12px]">2m 14s ago <small className="text-[#82939f]">May 18, 2025 14:32:41 UTC</small></strong></div></section><div className="mt-3 grid grid-cols-[.92fr_1.08fr] gap-3"><Pipeline /><ProfileComparison /></div><div className="mt-3 grid grid-cols-[1fr_1fr_1.4fr] gap-3"><section className="border border-[#1b303d] bg-[#071017] p-3"><h2 className="border-b border-[#1b303d] pb-3 text-[11px] font-semibold tracking-[.08em] text-[#a9b7c2]">ENTRY RULES</h2><div className="grid grid-cols-2 gap-4 pt-3 text-[10px]"><div><h3 className="mb-3 text-[#54baff]">TREND-FOLLOWING (Breakout)</h3>{["ADX(14) ≥ 20", "Price > EMA20 > EMA50 > EMA200", "Break above recent swing high", "RSI(14) 50 – 70", "Volume > 1.2 × Vol SMA(20)"].map((x) => <p key={x} className="mb-3 flex gap-2"><CheckCircle size={13} className="text-[#54baff]" />{x}</p>)}</div><div><h3 className="mb-3 text-[#e0b733]">MEAN-REVERSION (Range)</h3>{["ADX(14) < 20", "Price near 4h range extremes", "RSI(14) ≤ 30 (Long) / ≥ 70 (Short)", "Bounce off range boundary", "Volume < 0.8 × Vol SMA(20)"].map((x) => <p key={x} className="mb-3 flex gap-2"><Circle size={13} className="text-[#e0b733]" />{x}</p>)}</div></div></section><section className="border border-[#1b303d] bg-[#071017] p-3"><h2 className="border-b border-[#1b303d] pb-3 text-[11px] font-semibold tracking-[.08em] text-[#a9b7c2]">RISK & EXIT BEHAVIOR</h2><div className="grid grid-cols-[1fr_1fr] gap-y-3 pt-4 text-[11px]">{[["Initial Stop", "1.20 × ATR(14) (Swing)"], ["Trailing Stop", "1.50R (activates at 1.0R)"], ["Take Profit", "TP1: 1.5R (50%)   TP2: 3.0R (50%)"], ["Time Exit", "Max Hold: 96h"], ["Break-even", "Move stop to BE at 1.0R"], ["Partial Exit", "At 1.5R, exit 50%"], ["Max Loss / Day", "OFF"], ["Max Drawdown", "OFF"]].map(([a, b]) => <><span className="text-[#83939f]" key={a}>{a}</span><span key={b}>{b}</span></>)}</div></section><section className="border border-[#1b303d] bg-[#071017] p-3"><h2 className="border-b border-[#1b303d] pb-3 text-[11px] font-semibold tracking-[.08em] text-[#a9b7c2]">GATE STATISTICS <span className="font-normal tracking-normal">(Last 7 Days)</span></h2><div className="grid grid-cols-[1.3fr_.7fr_.7fr_.7fr_.8fr] pt-3 text-[10px]"><div className="contents text-[#8797a4]"><span> </span><span>PASSED</span><span>BLOCKED</span><span>PASS RATE</span><span>IMPACT (Edge Δ)</span></div>{gates.map(([name, passed, blocked, rate, impact], i) => <div key={name} className="contents"><span className="border-t border-[#172a35] py-2 text-[#bdc9d1]"><b className="mr-2 grid inline-grid h-4 w-4 place-items-center rounded-full bg-[#1b4e7a] text-[9px]">{i + 1}</b>{name}</span><span className="border-t border-[#172a35] py-2 font-mono">{passed}</span><span className="border-t border-[#172a35] py-2 font-mono">{blocked}</span><span className="border-t border-[#172a35] py-2 font-mono">{rate}</span><span className="border-t border-[#172a35] py-2 font-mono text-[#47dc85]">{impact}</span></div>)}</div><div className="mt-3 flex items-center justify-between border-t border-[#172a35] pt-3"><div><span className="text-[10px] text-[#8495a1]">OVERALL PASS RATE</span><strong className="mt-1 block text-[19px] text-[#dce5ed]">16.4%</strong></div><div className="grid h-16 w-16 place-items-center rounded-full border-[8px] border-[#258fff] border-r-[#263847] text-[10px]">16.4%</div></div></section></div></main></div>; }
+  return (
+    <div className="min-h-screen min-w-[1150px] bg-[#03080d] text-[#dce5ed]">
+      <main className="px-4 py-3">
+        <header className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <h1 className="text-[21px] font-semibold">Strategy</h1>
+            <span className="text-[10px] text-[#82929e]">Live config, straight from the server</span>
+          </div>
+        </header>
+
+        {error && <div className="mt-3 border border-[#765b20] bg-[#2a220f] px-3 py-2 text-[11px] text-[#eab83c]">{error}</div>}
+
+        <section className="mt-3 grid grid-cols-4 border border-[#1b303d] bg-[#071017]">
+          <div className="border-r border-[#1b303d] p-3">
+            <span className="text-[9px] text-[#8999a5]">ACTIVE PROFILE</span>
+            <strong className="mt-1 block text-[15px] text-[#43aaff]">{strategy?.profile.name ?? "—"}</strong>
+          </div>
+          <div className="border-r border-[#1b303d] p-3">
+            <span className="text-[9px] text-[#8999a5]">EXCHANGE / ENV</span>
+            <strong className="mt-1 block text-[14px]">{strategy?.execution.exchange ?? "—"} {strategy?.execution.testnet ? "(testnet)" : "(live)"}</strong>
+          </div>
+          <div className="border-r border-[#1b303d] p-3">
+            <span className="text-[9px] text-[#8999a5]">TIMEFRAME</span>
+            <strong className="mt-1 block text-[14px]">{strategy?.execution.timeframe ?? "—"}</strong>
+          </div>
+          <div className="p-3">
+            <span className="text-[9px] text-[#8999a5]">EVALUATION CADENCE</span>
+            <strong className="mt-1 block text-[12px]">{strategy?.execution.evaluation ?? "—"}</strong>
+          </div>
+        </section>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Card title="DECISION-ACTIVE MODULES">
+            <ul className="text-[11px]">
+              {(strategy?.profile.decision_active ?? []).map((m) => (
+                <li key={m} className="flex items-center gap-2 border-b border-[#172a35] py-2 text-[#5db7ff]"><CheckCircle size={13} />{m}</li>
+              ))}
+            </ul>
+          </Card>
+          <Card title="OBSERVE-ONLY MODULES">
+            <ul className="text-[11px]">
+              {(strategy?.profile.observe_only ?? []).length ? (strategy?.profile.observe_only ?? []).map((m) => (
+                <li key={m} className="flex items-center gap-2 border-b border-[#172a35] py-2 text-[#eab52e]"><Circle size={13} />{m} <span className="text-[#8797a2]">— data collected, not used in decisions</span></li>
+              )) : <li className="py-2 text-[#8797a2]">None — every module is decision-active in this profile.</li>}
+            </ul>
+          </Card>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <Card title="ENTRY RULES">
+            <div className="grid grid-cols-1 gap-4 text-[10px]">
+              <div>
+                <h3 className="mb-3 text-[#54baff]">TREND-FOLLOWING</h3>
+                {(strategy?.signals.trend_following ?? []).map((x) => <p key={x} className="mb-3 flex gap-2"><CheckCircle size={13} className="text-[#54baff]" />{x}</p>)}
+              </div>
+              <div>
+                <h3 className="mb-3 text-[#e0b733]">MEAN-REVERSION</h3>
+                {(strategy?.signals.mean_reversion ?? []).map((x) => <p key={x} className="mb-3 flex gap-2"><Circle size={13} className="text-[#e0b733]" />{x}</p>)}
+              </div>
+              <div>
+                <h3 className="mb-3 text-[#ff6167]">HARD BLOCKS</h3>
+                {(strategy?.signals.hard_blocks ?? []).map((x) => <p key={x} className="mb-3 flex gap-2">· {x}</p>)}
+              </div>
+            </div>
+          </Card>
+          <Card title="RISK & EXIT BEHAVIOR">
+            <div className="grid grid-cols-[1fr_1fr] gap-y-3 text-[11px]">
+              <KV label="Risk per Trade" value={strategy ? `${strategy.risk.max_risk_per_trade_pct}%` : "—"} />
+              <KV label="Max Concurrent Positions" value={strategy?.risk.max_concurrent_positions ?? "—"} />
+              <KV label="Portfolio Risk Cap" value={strategy ? `${strategy.risk.max_portfolio_risk_pct}%` : "—"} />
+              <KV label="Same-Direction Risk Cap" value={strategy ? `${strategy.risk.max_same_direction_risk_pct}%` : "—"} />
+              <KV label="Leverage" value={strategy ? `${strategy.risk.default_leverage}x (max ${strategy.risk.max_leverage}x)` : "—"} />
+              <KV label="Daily Drawdown Cap" value={strategy ? `${strategy.risk.daily_drawdown_pct}%` : "—"} />
+              <KV label="Stop Loss" value={strategy?.management.stop_loss ?? "—"} />
+              <KV label="Take Profit" value={strategy?.management.take_profit ?? "—"} />
+              <KV label="Trailing Stop" value={strategy?.management.regular_trailing ?? "—"} />
+              <KV label="Trailing Take Profit" value={strategy?.management.trailing_take_profit ?? "—"} />
+              <KV label="Max Hold" value={strategy?.management.max_hold ?? "—"} />
+            </div>
+          </Card>
+          <Card title="COST & EDGE GATES">
+            <div className="grid grid-cols-[1fr_1fr] gap-y-3 text-[11px]">
+              <KV label="Taker Fee" value={strategy ? `${strategy.costs.taker_fee_pct}%` : "—"} />
+              <KV label="Slippage Estimate" value={strategy ? `${strategy.costs.slippage_pct}%` : "—"} />
+              <KV label="Min EV (live)" value={strategy ? `${strategy.costs.min_live_ev_r}R` : "—"} />
+              <KV label="Min Edge After Cost" value={strategy ? `${strategy.costs.min_edge_after_cost_r}R` : "—"} />
+              <KV label="Max Estimated Cost" value={strategy ? `${strategy.costs.max_estimated_cost_r}R` : "—"} />
+              <KV label="Min Net EV After Cost" value={strategy ? `${strategy.costs.min_net_ev_after_cost_r}R` : "—"} />
+              <KV label="Re-entry / Symbol / Day" value={strategy?.management.reentry.max_trades_per_symbol_per_day ?? "—"} />
+              <KV label="Re-entry Min EV Multiplier" value={strategy?.management.reentry.min_ev_multiplier ?? "—"} />
+              <KV label="News Sentiment" value={strategy?.context.news_enabled ? `enabled (${strategy.context.news_provider})` : "disabled"} />
+            </div>
+          </Card>
+        </div>
+
+        <div className="mt-3">
+          <Card title="MARKET SCANNER">
+            <div className="grid grid-cols-4 gap-y-3 text-[11px]">
+              <KV label="Enabled" value={strategy?.scanner.enabled ? "Yes" : "No"} />
+              <KV label="Roster Size (Top N)" value={strategy?.scanner.top_n ?? "—"} />
+              <KV label="Refresh Interval" value={strategy ? `${strategy.scanner.refresh_minutes} min` : "—"} />
+              <KV label="Min Quote Volume" value={strategy?.scanner.min_quote_volume ?? "—"} />
+              <KV label="Max Spread" value={strategy ? `${strategy.scanner.max_spread_pct}%` : "—"} />
+              <KV label="Fixed Majors" value={strategy?.scanner.fixed_majors?.join(", ") || "—"} />
+            </div>
+          </Card>
+        </div>
+      </main>
+    </div>
+  );
+}
