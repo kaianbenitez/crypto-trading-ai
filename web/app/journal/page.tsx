@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BookOpen, ChartLineUp, DownloadSimple, GearSix, House, MagnifyingGlass, Radio, ShieldWarning, ShoppingCart, SlidersHorizontal, Star, X } from "@phosphor-icons/react";
+import AuthGate from "../components/AuthGate";
+import { api, Trade as ApiTrade } from "@/lib/api";
 
 type Trade = { id: number; closed: string; coin: string; side: "LONG" | "SHORT"; strategy: string; opened: string; held: string; entry: string; exit: string; gross: number; fees: number; net: number; r: string; reason: string; thesis: string; invalidation: string };
 
-const trades: Trade[] = [
+const demoTrades: Trade[] = [
   { id: 1, closed: "May 31, 14:32", coin: "SOL", side: "LONG", strategy: "AI Breakout v2", opened: "May 31, 08:15", held: "6h 17m", entry: "$165.42", exit: "$171.98", gross: 2980, fees: 52.31, net: 2927.69, r: "+1.76 R", reason: "Target Hit", thesis: "Breakout above 4H resistance with volume expansion and structure shift. Momentum alignment across 1H and 4H. AI Confidence: 72%", invalidation: "Close back below $163.20 (breakout level) or loss of 4H higher low structure." },
   { id: 2, closed: "May 31, 11:07", coin: "ETH", side: "SHORT", strategy: "Trend Fade v1", opened: "May 31, 06:40", held: "4h 27m", entry: "$2,675.33", exit: "$2,587.11", gross: 3306.50, fees: 48.67, net: 3257.83, r: "+1.42 R", reason: "Target Hit", thesis: "Rejection from daily supply zone with bearish divergence on RSI.", invalidation: "4H close above $2,700." },
   { id: 3, closed: "May 30, 02:14", coin: "BTC", side: "LONG", strategy: "AI Breakout v2", opened: "May 29, 21:12", held: "5h 02m", entry: "$105,312.50", exit: "$104,105.10", gross: -1207.40, fees: 37.85, net: -1245.25, r: "-0.72 R", reason: "Stop Hit", thesis: "Range expansion with positive momentum and rising volume.", invalidation: "Close below the breakout range." },
@@ -20,13 +22,31 @@ const nav = [["Overview", House], ["Strategies", ChartLineUp], ["Signals", Radio
 
 function money(value: number) { return `${value >= 0 ? "+" : "-"}$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 
-export default function JournalPage() {
+function JournalContent() {
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState(1);
   const [coin, setCoin] = useState("All Coins");
   const [strategy, setStrategy] = useState("All Strategies");
   const [exitReason, setExitReason] = useState("All Exit Reasons");
+  useEffect(() => {
+    api.trades(100).then((items: ApiTrade[]) => {
+      setTrades(items.filter((item) => item.closed_at).map((item) => ({
+        id: item.id, closed: item.closed_at ? new Date(item.closed_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—",
+        coin: item.symbol.replace("/USDT", "").replace("USDT", ""), side: item.side.toUpperCase() as "LONG" | "SHORT", strategy: item.strategy_name,
+        opened: new Date(item.opened_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }), held: "—",
+        entry: `$${item.entry_price.toLocaleString()}`, exit: item.exit_price == null ? "—" : `$${item.exit_price.toLocaleString()}`,
+        gross: item.pnl_usdt ?? 0, fees: 0, net: item.pnl_usdt ?? 0, r: "—", reason: item.exit_reason ?? "—",
+        thesis: item.entry_reasoning.join(" ") || "No thesis recorded.", invalidation: "See trade narrative for invalidation context.",
+      })));
+      setLoadError(null);
+    }).catch(() => setLoadError("Could not load trades from the backend.")).finally(() => setLoading(false));
+  }, []);
   const selected = trades.find((trade) => trade.id === selectedId) ?? trades[0];
   const visible = useMemo(() => trades.filter((trade) => (coin === "All Coins" || trade.coin === coin) && (strategy === "All Strategies" || trade.strategy === strategy) && (exitReason === "All Exit Reasons" || trade.reason === exitReason)), [coin, strategy, exitReason]);
+  if (loading) return <div className="grid min-h-screen place-items-center bg-[#04090e] text-[13px] text-[#8ea0ad]">Loading trade journal…</div>;
+  if (!trades.length) return <AuthGate><div className="grid min-h-screen place-items-center bg-[#04090e] text-center text-[13px] text-[#8ea0ad]"><div>{loadError ?? "No closed trades in the current database."}</div></div></AuthGate>;
   return <div className="min-h-screen min-w-[1450px] bg-[#04090e] text-[#dce5ed]">
     <aside className="fixed inset-y-0 left-0 flex w-[176px] flex-col border-r border-[#182832] bg-[#071016]">
       <div className="flex h-[64px] items-center gap-2 border-b border-[#182832] px-5 text-[20px] font-semibold">Trading<span className="text-[#299cff]">AI</span></div>
@@ -41,4 +61,8 @@ export default function JournalPage() {
       <footer className="mt-3 text-[10px] text-[#778896]">All times in UTC &nbsp; | &nbsp; Fees include taker fees and estimated slippage</footer>
     </main>
   </div>;
+}
+
+export default function JournalPage() {
+  return <AuthGate><JournalContent /></AuthGate>;
 }
