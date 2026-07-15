@@ -26,25 +26,27 @@ function JournalContent() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState(1);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [coin, setCoin] = useState("All Coins");
   const [strategy, setStrategy] = useState("All Strategies");
   const [exitReason, setExitReason] = useState("All Exit Reasons");
   useEffect(() => {
-    api.trades(100).then((items: ApiTrade[]) => {
-      setTrades(items.filter((item) => item.closed_at).map((item) => ({
+    api.trades(500).then((items: ApiTrade[]) => {
+      const closedTrades = items.filter((item) => item.closed_at).map((item) => ({
         id: item.id, closed: item.closed_at ? new Date(item.closed_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—",
         coin: item.symbol.replace("/USDT", "").replace("USDT", ""), side: item.side.toUpperCase() as "LONG" | "SHORT", strategy: item.strategy_name,
         opened: new Date(item.opened_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }), held: "—",
         entry: `$${item.entry_price.toLocaleString()}`, exit: item.exit_price == null ? "—" : `$${item.exit_price.toLocaleString()}`,
         gross: item.pnl_usdt ?? 0, fees: 0, net: item.pnl_usdt ?? 0, r: "—", reason: item.exit_reason ?? "—",
         thesis: item.entry_reasoning.join(" ") || "No thesis recorded.", invalidation: "See trade narrative for invalidation context.",
-      })));
+      }));
+      setTrades(closedTrades);
+      setSelectedId((current) => current ?? closedTrades[0]?.id ?? null);
       setLoadError(null);
     }).catch(() => setLoadError("Could not load trades from the backend.")).finally(() => setLoading(false));
   }, []);
   const selected = trades.find((trade) => trade.id === selectedId) ?? trades[0];
-  const visible = useMemo(() => trades.filter((trade) => (coin === "All Coins" || trade.coin === coin) && (strategy === "All Strategies" || trade.strategy === strategy) && (exitReason === "All Exit Reasons" || trade.reason === exitReason)), [coin, strategy, exitReason]);
+  const visible = useMemo(() => trades.filter((trade) => (coin === "All Coins" || trade.coin === coin) && (strategy === "All Strategies" || trade.strategy === strategy) && (exitReason === "All Exit Reasons" || trade.reason === exitReason)), [trades, coin, strategy, exitReason]);
   if (loading) return <div className="grid min-h-screen place-items-center bg-[#04090e] text-[13px] text-[#8ea0ad]">Loading trade journal…</div>;
   if (!trades.length) return <AuthGate><div className="grid min-h-screen place-items-center bg-[#04090e] text-center text-[13px] text-[#8ea0ad]"><div>{loadError ?? "No closed trades in the current database."}</div></div></AuthGate>;
   return <div className="min-h-screen min-w-[1450px] bg-[#04090e] text-[#dce5ed]">
