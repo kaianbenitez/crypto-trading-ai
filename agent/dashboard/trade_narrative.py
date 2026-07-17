@@ -167,6 +167,13 @@ def _why_accepted_lines(snapshot: dict) -> list[str]:
     if smc_boost:
         lines.append(f"Extra confluence from order-block/FVG/liquidity-sweep signals added {smc_boost:.2f} to confidence.")
 
+    mfe = snapshot.get("mfe_r")
+    mae = snapshot.get("mae_r")
+    if mfe is not None or mae is not None:
+        mfe_txt = f"{float(mfe):.2f}R" if mfe is not None else "—"
+        mae_txt = f"{float(mae):.2f}R" if mae is not None else "—"
+        lines.append(f"MFE {mfe_txt} / MAE {mae_txt}.")
+
     return lines[:3]
 
 
@@ -300,6 +307,10 @@ class TradeNarrative:
     held_duration: str | None = None
     lesson_line: str | None = None
     failure_line: str | None = None
+    mfe_r: float | None = None
+    mae_r: float | None = None
+    mfe_price: float | None = None
+    mae_price: float | None = None
 
     # Backward-compatible alias — earlier code/UI referred to this section as
     # "concern"; keep the attribute name usable both ways.
@@ -348,6 +359,10 @@ def build_narrative(trade, session=None) -> TradeNarrative:
         narrative.pnl_usdt = trade.pnl_usdt
         narrative.r_multiple = _r_multiple(trade)
         narrative.held_duration = _held_duration(trade)
+        narrative.mfe_r = snapshot.get("mfe_r")
+        narrative.mae_r = snapshot.get("mae_r")
+        narrative.mfe_price = snapshot.get("mfe_price")
+        narrative.mae_price = snapshot.get("mae_price")
 
         weakness = narrative.weakness_line
         if trade.outcome == "loss":
@@ -376,7 +391,15 @@ def build_narrative(trade, session=None) -> TradeNarrative:
             else:
                 narrative.lesson_line = "The setup played out as expected — reinforces this strategy in this kind of market."
         else:
-            narrative.failure_line = "Closed roughly breakeven."
-            narrative.lesson_line = "No strong signal either way from this trade."
+            mfe = trade.get_indicator_snapshot().get("mfe_r")
+            mae = trade.get_indicator_snapshot().get("mae_r")
+            if mfe is not None or mae is not None:
+                mfe_txt = f"{float(mfe):.2f}R" if mfe is not None else "—"
+                mae_txt = f"{float(mae):.2f}R" if mae is not None else "—"
+                narrative.failure_line = f"Closed roughly breakeven after reaching MFE {mfe_txt} and MAE {mae_txt}."
+                narrative.lesson_line = "The trade moved enough to matter, but not enough to justify the final result. Review entry timing and exit management together."
+            else:
+                narrative.failure_line = "Closed roughly breakeven."
+                narrative.lesson_line = "No strong signal either way from this trade."
 
     return narrative

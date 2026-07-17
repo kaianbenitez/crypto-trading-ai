@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, Depends, Response, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-from agent.config.settings import settings
+from agent.config.settings import settings, save_runtime_overrides
 from agent.db.models import get_session, Trade, PerCoinBrainState, ParamChangeLog, TrailingStopEvent, CoinDigest, RosterState, SignalGateEvent, AgentActivityLog
 from agent.exchange.binance_futures import BinanceFuturesAdapter
 from agent.dashboard.candlestick_panel import build_candlestick_payload
@@ -22,6 +22,7 @@ from webapi.app_state import get_or_create_state
 from webapi.auth import verify_password, create_session_token, require_session, SESSION_COOKIE
 from webapi.schemas import (
     LoginRequest, TradeOut, KillSwitchRequest, SummaryOut, AgentStatusOut, LivePositionOut, CoinDigestOut,
+    SettingsSnapshotOut, SettingsUpdateRequest, SettingsUpdateOut, InsightsOut, InsightItemOut,
 )
 
 app = FastAPI(title="Crypto Trading AI")
@@ -108,6 +109,7 @@ def trade_narrative(trade_id: int, session=Depends(db), _=Depends(require_sessio
         "invalidation_line": n.invalidation_line, "past_context_line": n.past_context_line,
         "outcome": n.outcome, "exit_reason": n.exit_reason, "exit_price": n.exit_price,
         "pnl_usdt": n.pnl_usdt, "r_multiple": n.r_multiple, "held_duration": n.held_duration,
+        "mfe_r": n.mfe_r, "mae_r": n.mae_r, "mfe_price": n.mfe_price, "mae_price": n.mae_price,
         "lesson_line": n.lesson_line, "failure_line": n.failure_line,
     }
 
@@ -237,7 +239,186 @@ def news_status(_=Depends(require_session)):
     }
 
 
+@app.get("/api/settings", response_model=SettingsSnapshotOut)
+def get_settings(_=Depends(require_session)):
+    return SettingsSnapshotOut(
+        updated_at=None,
+        values=settings.runtime_snapshot(),
+    )
+
+
+@app.put("/api/settings", response_model=SettingsUpdateOut)
+def update_settings(payload: SettingsUpdateRequest, _=Depends(require_session)):
+    save_runtime_overrides(payload.values)
+    return SettingsUpdateOut(
+        ok=True,
+        updated_at=datetime.now(timezone.utc).replace(microsecond=0),
+        values=settings.runtime_snapshot(),
+    )
+
+
 _CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+
+
+def _fmt_pct(value: float | None, digits: int = 2) -> str:
+    if value is None:
+        return "—"
+    sign = "+" if value > 0 else ""
+    return f"{sign}{value:.{digits}f}%"
+
+
+def _fmt_money(value: float | None) -> str:
+    if value is None:
+        return "—"
+    sign = "+" if value >= 0 else "-"
+    return f"{sign}${abs(value):,.2f}"
+
+
+@app.get("/api/insights", response_model=InsightsOut)
+def insights(session=Depends(db), _=Depends(require_session)):
+    risk = latest_risk_snapshot(session, settings)
+    summary = {
+        "total_trades": risk["metrics"].trade_count,
+        "closed_trades": risk["metrics"].closed_count,
+        "open_positions": risk["metrics"].open_count,
+        "roi_pct": risk["metrics"].roi_pct,
+        "win_rate_pct": risk["metrics"].win_rate_pct,
+        "total_pnl_usdt": risk["metrics"].total_pnl_usdt,
+    }
+    roster_data = roster(session=session)
+    gate_24h = gate_stats("24h", session=session)
+    gate_7d = gate_stats("7d", session=session)
+    recent_activity = activity_log(limit=12, session=session)
+    adaptive = adaptive_activity(limit=8, session=session)
+    recent_trades = (
+        session.query(Trade)
+        .filter(Trade.closed_at.isnot(None))
+        .order_by(Trade.closed_at.desc())
+        .limit(12)
+        .all()
+    )
+
+    exit_breakdown = risk["metrics"].exit_reason_breakdown
+    strongest_symbol = max(risk["metrics"].by_symbol.items(), key=lambda item: item[1]["pnl"], default=None)
+    weakest_symbol = min(risk["metrics"].by_symbol.items(), key=lambda item: item[1]["pnl"], default=None)
+    top_strategy = max(risk["metrics"].by_strategy.items(), key=lambda item: item[1]["pnl"], default=None)
+    runner_count = risk["metrics"].runner_count
+    trailing_stop_count = exit_breakdown.get("trailing_stop", 0)
+    take_profit_count = exit_breakdown.get("take_profit", 0)
+
+    recommendations = []
+    if not risk["readiness"]["ready"]:
+        recommendations.append(
+            f"Validation is still gating proven risk: {', '.join(risk['readiness']['failed'][:3]) or 'sample still maturing'}."
+        )
+    if risk["metrics"].avg_estimated_cost_r and risk["metrics"].tiny_win_count > 0:
+        recommendations.append(
+            f"Average estimated cost is {risk['metrics'].avg_estimated_cost_r:.2f}R and {risk['metrics'].tiny_win_count} small wins are leaving little room after fees."
+        )
+    if trailing_stop_count > take_profit_count:
+        recommendations.append(
+            f"Trailing-stop exits ({trailing_stop_count}) are outnumbering fixed TPs ({take_profit_count}); the runner path may be too aggressive."
+        )
+    if runner_count == 0 and take_profit_count > 0:
+        recommendations.append("No runner closes were recorded in this window, so trend trades are probably still hitting the fixed TP or stop too early.")
+    if risk["metrics"].reentry_count > 0:
+        recommendations.append(
+            f"Re-entries contributed {risk['metrics'].reentry_count} trades; check whether same-coin churn is helping or just paying extra fees."
+        )
+    if roster_data.get("scan", {}).get("status") not in (None, "healthy", "running", "ok", "admitted"):
+        recommendations.append(f"Scanner status is {roster_data.get('scan', {}).get('status')} — shortlist quality may be lagging.")
+
+    if strongest_symbol:
+        sym, row = strongest_symbol
+        recommendations.append(f"Best symbol by P&L: {sym} ({_fmt_money(row['pnl'])}, avg {row['avg_r']:.2f}R).")
+    if weakest_symbol:
+        sym, row = weakest_symbol
+        recommendations.append(f"Weakest symbol by P&L: {sym} ({_fmt_money(row['pnl'])}, avg {row['avg_r']:.2f}R).")
+    if top_strategy:
+        sym, row = top_strategy
+        recommendations.append(f"Top strategy: {sym} ({_fmt_money(row['pnl'])}, {row['count']} trades).")
+
+    signals = [
+        InsightItemOut(title="Validation", value=f"{risk['validation']['days_elapsed']}d", note=f"{risk['validation']['days_remaining']}d until the 30-day floor"),
+        InsightItemOut(title="Profit factor", value=f"{risk['metrics'].profit_factor:.2f}", note=f"Expectancy {risk['metrics'].expectancy_r:.2f}R / after cost {risk['metrics'].expectancy_after_estimated_cost_r:.2f}R"),
+        InsightItemOut(title="Trailing exits", value=str(trailing_stop_count), note=f"Runner exits {runner_count}, fixed TPs {take_profit_count}"),
+        InsightItemOut(title="Gate pressure", value=str(gate_24h["total"]), note=f"{gate_24h['window']} rejects, {gate_7d['total']} over 7d"),
+        InsightItemOut(title="Scanner", value=str(roster_data.get("scan", {}).get("selected_count") or 0), note=f"Shortlisted out of {roster_data.get('scan', {}).get('eligible') or 0} eligible"),
+    ]
+
+    return InsightsOut(
+        generated_at=datetime.now(timezone.utc).replace(microsecond=0),
+        summary=summary,
+        risk={
+            "tier": risk["tier"],
+            "risk_pct": risk["risk_pct"],
+            "drawdown_pct": risk["drawdown_pct"],
+            "reason": risk["reason"],
+            "effective_bankroll_usdt": risk["effective_bankroll_usdt"],
+            "bankroll_divergence_pct": risk["bankroll_divergence_pct"],
+        },
+        validation={
+            "ready": risk["readiness"]["ready"],
+            "failed": risk["readiness"]["failed"],
+            "days_elapsed": risk["validation"]["days_elapsed"],
+            "days_remaining": risk["validation"]["days_remaining"],
+            "min_days_required": risk["validation"]["min_days_required"],
+            "closed_count": risk["metrics"].closed_count,
+            "expectancy_after_cost_r": risk["metrics"].expectancy_after_estimated_cost_r,
+            "profit_factor": risk["metrics"].profit_factor,
+            "max_drawdown_pct": risk["metrics"].max_drawdown_pct,
+        },
+        scan=roster_data,
+        trading={
+            "exit_breakdown": exit_breakdown,
+            "by_symbol": risk["metrics"].by_symbol,
+            "by_strategy": risk["metrics"].by_strategy,
+            "reentry_count": risk["metrics"].reentry_count,
+            "reentry_expectancy_r": risk["metrics"].reentry_expectancy_r,
+            "runner_count": runner_count,
+            "runner_pnl_usdt": risk["metrics"].runner_pnl_usdt,
+            "avg_estimated_cost_r": risk["metrics"].avg_estimated_cost_r,
+            "high_cost_trade_count": risk["metrics"].high_cost_trade_count,
+            "tiny_win_count": risk["metrics"].tiny_win_count,
+            "open_risk_usdt": risk["metrics"].open_risk_usdt,
+            "recent_closed_trades": [
+                {
+                    "id": t.id,
+                    "symbol": t.symbol,
+                    "side": t.side,
+                    "strategy_name": t.strategy_name,
+                    "pnl_usdt": t.pnl_usdt,
+                    "exit_reason": t.exit_reason,
+                    "opened_at": t.opened_at,
+                    "closed_at": t.closed_at,
+                }
+                for t in recent_trades
+            ],
+        },
+        signals=signals,
+        recommendations=recommendations,
+        recent_activity=[
+            {
+                "id": entry["id"],
+                "cycle": entry["cycle"],
+                "symbol": entry["symbol"],
+                "level": entry["level"],
+                "message": entry["message"],
+                "created_at": entry["created_at"],
+            }
+            for entry in recent_activity[:8]
+        ] + [
+            {
+                "id": idx,
+                "cycle": None,
+                "symbol": item["symbol"],
+                "level": "info",
+                "message": f"{item['type']}: {item['message']}",
+                "created_at": item["created_at"],
+            }
+            for idx, item in enumerate(adaptive[:5], start=1)
+        ],
+    )
 
 
 @app.get("/api/strategy-profile")

@@ -72,6 +72,9 @@ PROFILES: dict[str, StrategyProfile] = {
     "baseline_simple": StrategyProfile(
         "baseline_simple", smc_active=False, news_active=False, memory_active=False, adaptive_active=False,
     ),
+    "guarded_agentic": StrategyProfile(
+        "guarded_agentic", smc_active=True, news_active=True, memory_active=True, adaptive_active=False,
+    ),
     "full_agentic": StrategyProfile(
         "full_agentic", smc_active=True, news_active=True, memory_active=True, adaptive_active=True,
     ),

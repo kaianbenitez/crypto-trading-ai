@@ -274,9 +274,13 @@ def _locked_r(trade: Trade) -> float:
     return ((float(trade.stop_loss) - float(trade.entry_price)) * direction) / initial_r
 
 
-def _trend_runner_eligible(trade: Trade) -> bool:
-    strategy = (trade.strategy_name or "").lower()
-    regime = (trade.regime or "").lower()
+def _trend_runner_eligible(trade_or_strategy, regime: str | None = None) -> bool:
+    if regime is None and hasattr(trade_or_strategy, "strategy_name"):
+        strategy = (getattr(trade_or_strategy, "strategy_name", "") or "").lower()
+        regime = (getattr(trade_or_strategy, "regime", "") or "").lower()
+    else:
+        strategy = (str(trade_or_strategy or "")).lower()
+        regime = (str(regime or "")).lower()
     return (
         "trend" in strategy
         or "momentum" in strategy
@@ -292,10 +296,70 @@ def _set_trade_snapshot(trade: Trade, updates: dict) -> None:
     trade.set_indicator_snapshot(snapshot)
 
 
+def _initial_trade_risk(trade: Trade) -> float:
+    snapshot = trade.get_indicator_snapshot()
+    initial_stop = float(snapshot.get("initial_stop_loss") or trade.stop_loss or trade.entry_price or 0.0)
+    return abs(float(trade.entry_price or 0.0) - initial_stop)
+
+
+def _update_trade_excursion(trade: Trade, df: pd.DataFrame) -> None:
+    if df.empty:
+        return
+    initial_r = _initial_trade_risk(trade)
+    if initial_r <= 0:
+        return
+
+    snapshot = trade.get_indicator_snapshot()
+    entry = float(trade.entry_price or 0.0)
+    high = float(df["high"].max()) if "high" in df else entry
+    low = float(df["low"].min()) if "low" in df else entry
+    now = datetime.now(timezone.utc).isoformat()
+
+    if trade.side == "long":
+        mfe_r = max(float(snapshot.get("mfe_r") or 0.0), max(0.0, (high - entry) / initial_r))
+        mae_r = max(float(snapshot.get("mae_r") or 0.0), max(0.0, (entry - low) / initial_r))
+        mfe_price = max(float(snapshot.get("mfe_price") or entry), high)
+        mae_price = min(float(snapshot.get("mae_price") or entry), low)
+    else:
+        mfe_r = max(float(snapshot.get("mfe_r") or 0.0), max(0.0, (entry - low) / initial_r))
+        mae_r = max(float(snapshot.get("mae_r") or 0.0), max(0.0, (high - entry) / initial_r))
+        mfe_price = min(float(snapshot.get("mfe_price") or entry), low)
+        mae_price = max(float(snapshot.get("mae_price") or entry), high)
+
+    snapshot.update({
+        "initial_stop_loss": float(snapshot.get("initial_stop_loss") or trade.stop_loss or entry),
+        "initial_risk_r": round(initial_r, 8),
+        "last_mark_price": round(float(df.iloc[-1]["close"]), 8),
+        "last_mark_at": now,
+        "mfe_r": round(mfe_r, 4),
+        "mae_r": round(mae_r, 4),
+        "mfe_price": round(mfe_price, 8),
+        "mae_price": round(mae_price, 8),
+        "mfe_at": snapshot.get("mfe_at") or now,
+        "mae_at": snapshot.get("mae_at") or now,
+    })
+    trade.set_indicator_snapshot(snapshot)
+
+
+def _replace_stop_for_qty(adapter, state, trade: Trade, qty: float) -> None:
+    if qty <= 0:
+        return
+    entry_side = "buy" if trade.side == "long" else "sell"
+    if state.sl_order_id:
+        try:
+            adapter.cancel_order(trade.symbol, state.sl_order_id)
+        except Exception:
+            pass
+    sl_order = adapter.place_stop_loss(trade.symbol, entry_side, qty, trade.stop_loss)
+    state.sl_order_id = sl_order.order_id
+
+
 def _maybe_activate_trailing_take_profit(adapter, session, state, trade: Trade, df: pd.DataFrame, params: dict) -> bool:
     if state.tp_trailing_active or not state.tp_order_id or not state.sl_order_id or df.empty:
         return False
     if not bool(params.get("enable_trailing_take_profit", True)):
+        return False
+    if bool(params.get("enable_partial_take_profit", False)) or bool(trade.get_indicator_snapshot().get("partial_tp_enabled")):
         return False
     if not _trend_runner_eligible(trade):
         return False
@@ -419,6 +483,20 @@ class SymbolState:
             context_window_candles=120,
             max_atr_ratio=2.5,
             min_ev_r=settings.min_live_ev_r,
+            enable_partial_take_profit=settings.enable_partial_take_profit,
+            partial_take_profit_pct=settings.partial_take_profit_pct,
+            partial_take_profit_r=settings.partial_take_profit_r,
+            enable_trailing_take_profit=settings.enable_trailing_take_profit,
+            trail_activation_r=settings.trail_activation_r,
+            trail_atr_mult=settings.trail_atr_mult,
+            trail_high_vol_atr_ratio=settings.trail_high_vol_atr_ratio,
+            trail_chandelier_lookback=settings.trail_chandelier_lookback,
+            trail_chandelier_atr_mult=settings.trail_chandelier_atr_mult,
+            trail_structure_lookback=settings.trail_structure_lookback,
+            trail_min_move_pct=settings.trail_min_move_pct,
+            tp_trail_activation_r=settings.tp_trail_activation_r,
+            tp_trail_min_locked_r=settings.tp_trail_min_locked_r,
+            tp_trail_min_ev_r=settings.tp_trail_min_ev_r,
         )
         self.be_armed      = False
         self.tp_trailing_active = False
@@ -633,6 +711,24 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
             f"SL {old_sl:.4f}->{plan.stop_loss:.4f}, TP {old_tp:.4f}->{plan.take_profit:.4f}"
         )
 
+    initial_r = abs(float(fill_price) - float(plan.stop_loss))
+    partial_tp_enabled = bool(params.get("enable_partial_take_profit", False)) and _trend_runner_eligible(
+        signal.strategy_name,
+        str(signal.indicator_snapshot.get("regime", "unknown")),
+    )
+    tp_qty = actual_qty
+    tp_price = plan.take_profit
+    tp_mode = "full"
+    if partial_tp_enabled and initial_r > 0:
+        partial_pct = max(0.05, min(0.95, float(params.get("partial_take_profit_pct", 0.33))))
+        tp_r = max(0.5, float(params.get("partial_take_profit_r", 1.5)))
+        proposed_qty = round(actual_qty * partial_pct, 8)
+        if 0 < proposed_qty < actual_qty:
+            tp_qty = proposed_qty
+            direction = 1 if signal.side == Side.LONG else -1
+            tp_price = fill_price + (initial_r * tp_r * direction)
+            tp_mode = "partial"
+
     try:
         sl_order = adapter.place_stop_loss(state.symbol, entry_side, actual_qty, plan.stop_loss)
         state.sl_order_id = sl_order.order_id
@@ -649,7 +745,7 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
         return False
 
     try:
-        tp_order = adapter.place_take_profit(state.symbol, entry_side, actual_qty, plan.take_profit)
+        tp_order = adapter.place_take_profit(state.symbol, entry_side, tp_qty, tp_price)
         state.tp_order_id = tp_order.order_id
     except Exception as e:
         log.warning(f"[{state.symbol}] Take-profit order failed: {e}")
@@ -687,6 +783,13 @@ def _open_trade(adapter, session, risk, state, signal, row, params) -> bool:
     signal.indicator_snapshot["actual_risk_pct"] = round(actual_risk_pct, 4)
     signal.indicator_snapshot["actual_risk_usdt"] = round(actual_risk_amount, 4)
     signal.indicator_snapshot["actual_qty"] = round(actual_qty, 8)
+    signal.indicator_snapshot["initial_stop_loss"] = round(float(plan.stop_loss), 8)
+    signal.indicator_snapshot["initial_risk_r"] = round(initial_r, 8)
+    signal.indicator_snapshot["original_take_profit"] = round(float(plan.take_profit), 8)
+    signal.indicator_snapshot["partial_tp_enabled"] = partial_tp_enabled
+    signal.indicator_snapshot["partial_tp_mode"] = tp_mode
+    signal.indicator_snapshot["partial_tp_qty"] = round(tp_qty, 8)
+    signal.indicator_snapshot["partial_tp_price"] = round(tp_price, 8)
     trade.set_entry_reasoning(signal.reasoning)
     trade.set_indicator_snapshot(signal.indicator_snapshot)
     trade.set_params_snapshot(params)
@@ -825,15 +928,21 @@ def _check_close(adapter, session, risk, state) -> bool:
     # Update DB qty so force-close uses the right size and dashboard shows correct numbers.
     if still_open and live_qty is not None and live_qty > 0 and trade.qty > 0:
         if live_qty < trade.qty * 0.99:  # >1% discrepancy = partial fill
+            previous_qty = float(trade.qty)
             log.info(
                 f"[{state.symbol}] Partial fill: DB qty={trade.qty:.4f} → "
                 f"exchange qty={live_qty:.4f} ({(1 - live_qty / trade.qty) * 100:.1f}% closed by exchange)"
             )
             trade.qty = live_qty
             session.commit()
+            state.tp_order_id = None
+            try:
+                _replace_stop_for_qty(adapter, state, trade, live_qty)
+            except Exception as e:
+                log.warning(f"[{state.symbol}] Could not resize stop after partial fill: {e}")
             _tg(
                 f"🔄 {state.symbol} partial TP fill detected\n"
-                f"Remaining: {live_qty:.4f} (was {trade.qty:.4f})\n"
+                f"Remaining: {live_qty:.4f} (was {previous_qty:.4f})\n"
                 f"DB qty updated — continuing to monitor remainder"
             )
 
@@ -850,6 +959,7 @@ def _check_close(adapter, session, risk, state) -> bool:
                     trail_df.sort_values("timestamp").reset_index(drop=True),
                     trade_params,
                 ).dropna()
+                _update_trade_excursion(trade, trail_df)
                 trail = TrailingStopManager(adapter, session, _tg).maybe_update(
                     trade=trade,
                     state=state,

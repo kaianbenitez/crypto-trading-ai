@@ -53,18 +53,6 @@ function JournalContent() {
     return { netPnl, winRatePct: (wins / visible.length) * 100, wins, sampleSize: visible.length };
   }, [visible]);
 
-  const byStrategy = useMemo(() => {
-    const map = new Map<string, { n: number; wins: number; pnl: number }>();
-    for (const t of visible) {
-      const s = map.get(t.strategy_name) ?? { n: 0, wins: 0, pnl: 0 };
-      s.n += 1;
-      s.pnl += t.pnl_usdt ?? 0;
-      if ((t.pnl_usdt ?? 0) > 0) s.wins += 1;
-      map.set(t.strategy_name, s);
-    }
-    return Array.from(map.entries()).map(([name, s]) => ({ name, ...s, winRatePct: (s.wins / s.n) * 100 }));
-  }, [visible]);
-
   if (loading) return <div className="grid min-h-screen place-items-center bg-[#04090e] text-[13px] text-[#8ea0ad]">Loading trade journal…</div>;
   if (!trades.length) return <div className="grid min-h-screen place-items-center bg-[#04090e] text-center text-[13px] text-[#8ea0ad]"><div>{loadError ?? "No closed trades in the current database."}</div></div>;
 
@@ -151,53 +139,54 @@ function JournalContent() {
                 <dt className="text-[#8293a0]">Entry</dt><dd>${selected.entry_price.toLocaleString()}</dd>
                 <dt className="text-[#8293a0]">Exit</dt><dd>{selected.exit_price == null ? "—" : `$${selected.exit_price.toLocaleString()}`}</dd>
                 <dt className="text-[#8293a0]">Net P&L</dt><dd className={(selected.pnl_usdt ?? 0) >= 0 ? "text-[#45dd84]" : "text-[#ff5960]"}>{money(selected.pnl_usdt)}</dd>
+                <dt className="text-[#8293a0]">MFE / MAE</dt><dd>{narrative?.mfe_r != null || narrative?.mae_r != null ? `${narrative?.mfe_r?.toFixed(2) ?? "—"}R / ${narrative?.mae_r?.toFixed(2) ?? "—"}R` : "—"}</dd>
               </dl>
             </div>
             <div className="grid grid-cols-2 gap-4 p-4">
               <div>
                 <h3 className="text-[13px] font-medium">Entry Thesis</h3>
                 <p className="mt-3 text-[11px] leading-5 text-[#c5d1db]">{narrative?.thesis_lines?.join(" ") || selected.entry_reasoning.join(" ") || "No thesis recorded."}</p>
+                {narrative?.why_accepted_lines && narrative.why_accepted_lines.length > 0 && (
+                  <>
+                    <h3 className="mt-6 text-[13px] font-medium text-[#58b7ff]">Why it passed</h3>
+                    <ul className="mt-3 space-y-2 text-[11px] leading-5 text-[#c5d1db]">
+                      {narrative.why_accepted_lines.map((line) => <li key={line}>• {line}</li>)}
+                    </ul>
+                  </>
+                )}
                 <h3 className="mt-6 text-[13px] font-medium text-[#ff5a61]">Invalidation</h3>
                 <p className="mt-3 text-[11px] leading-5 text-[#c5d1db]">{narrative?.invalidation_line ?? "—"}</p>
+                <h3 className="mt-6 text-[13px] font-medium text-[#b27aff]">What changed</h3>
+                <p className="mt-3 text-[11px] leading-5 text-[#c5d1db]">{narrative?.past_context_line ?? "—"}</p>
               </div>
               <div>
                 <h3 className="text-[13px] font-medium">Exit Reason</h3>
                 <p className="mt-3 text-[11px] text-[#48dd86]">{selected.exit_reason ?? "—"}</p>
                 {narrative?.lesson_line && (
-                  <div className="mt-5 border border-[#583a6e] bg-[#1d1328] p-3">
-                    <div className="text-[12px] font-semibold text-[#c88bff]">Lesson Observed</div>
-                    <p className="mt-2 text-[10px] leading-4 text-[#c2b5cd]">{narrative.lesson_line}</p>
+                  <div className="mt-4 border border-[#324c62] bg-[#0b1720] p-3">
+                    <div className="text-[12px] font-semibold text-[#7fc7ff]">AI / agent view</div>
+                    <p className="mt-2 text-[10px] leading-4 text-[#c2d0da]">{narrative.lesson_line}</p>
                   </div>
                 )}
                 {narrative?.failure_line && (
                   <div className="mt-3 border border-[#583a6e] bg-[#1d1328] p-3">
-                    <div className="text-[12px] font-semibold text-[#ff8b8b]">What Went Wrong</div>
+                    <div className="text-[12px] font-semibold text-[#ff8b8b]">What went wrong</div>
                     <p className="mt-2 text-[10px] leading-4 text-[#c2b5cd]">{narrative.failure_line}</p>
+                  </div>
+                )}
+                <div className="mt-3 border border-[#324c62] bg-[#0b1720] p-3 text-[11px] text-[#c2d0da]">
+                  <div className="text-[12px] font-semibold text-[#7fc7ff]">Exit details</div>
+                  <p className="mt-2">Entry {selected.entry_price.toLocaleString()} · Exit {selected.exit_price == null ? "—" : selected.exit_price.toLocaleString()} · Hold {narrative?.held_duration ?? "—"}</p>
+                  <p className="mt-1">Confidence {narrative?.confidence != null ? `${(narrative.confidence * 100).toFixed(0)}%` : "—"} · EV {narrative?.ev_r != null ? `${narrative.ev_r.toFixed(2)}R` : "—"}</p>
+                </div>
+                {narrative?.lesson_line && (
+                  <div className="mt-3 border border-[#324c62] bg-[#0b1720] p-3 text-[11px] text-[#c2d0da]">
+                    <div className="text-[12px] font-semibold text-[#7fc7ff]">Notes</div>
+                    <p className="mt-2 text-[10px] leading-4 text-[#c2d0da]">{selected.postmortem.join(" ") || narrative.lesson_line}</p>
                   </div>
                 )}
               </div>
             </div>
-          </section>
-        )}
-
-        {byStrategy.length > 0 && (
-          <section className="mt-3 border border-[#1a303b] bg-[#071118] p-4">
-            <h2 className="text-[13px] font-medium">Strategy Comparison <span className="text-[10px] text-[#8495a3]">(current filter)</span></h2>
-            <table className="mt-4 w-full border-collapse text-[11px]">
-              <thead className="text-left text-[10px] text-[#8495a3]">
-                <tr><th className="pb-3">Strategy</th><th className="pb-3">Net P&L</th><th className="pb-3">Win Rate</th><th className="pb-3">Trades</th></tr>
-              </thead>
-              <tbody>
-                {byStrategy.map((row) => (
-                  <tr key={row.name} className="border-t border-[#182832]">
-                    <td className="py-3">{row.name}</td>
-                    <td className={`py-3 font-mono ${row.pnl >= 0 ? "text-[#45dd84]" : "text-[#ff5960]"}`}>{money(row.pnl)}</td>
-                    <td className="py-3 font-mono text-[#dce5ed]">{row.winRatePct.toFixed(1)}%</td>
-                    <td className="py-3 font-mono text-[#dce5ed]">{row.n}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </section>
         )}
 

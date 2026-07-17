@@ -40,7 +40,7 @@ function Inspector({ entry, onClose }: { entry: ActivityLogEntry | null; onClose
           <span className="font-mono text-[10px] text-[#8594a3]">ID: {entry.id}</span>
         </div>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 py-4 text-[11px]">
-          <div><dt className="text-[#778796]">Time (UTC)</dt><dd className="mt-1 font-mono text-[#dbe3eb]">{new Date(entry.created_at).toLocaleTimeString([], { hour12: false })}</dd></div>
+          <div><dt className="text-[#778796]">Time (UTC)</dt><dd className="mt-1 font-mono text-[#dbe3eb]">{new Date(entry.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" })} UTC</dd></div>
           <div><dt className="text-[#778796]">Coin</dt><dd className="mt-1 font-mono text-[#dbe3eb]">{entry.symbol ?? "—"}</dd></div>
           <div><dt className="text-[#778796]">Cycle</dt><dd className="mt-1 font-mono text-[#dbe3eb]">{entry.cycle ?? "—"}</dd></div>
         </dl>
@@ -128,7 +128,7 @@ export default function LiveLogPage() {
             <div>
               {filtered.length ? filtered.map((entry) => (
                 <button key={entry.id} onClick={() => setSelectedId(entry.id)} className={`grid min-h-[34px] w-full grid-cols-[110px_105px_108px_minmax(320px,1fr)] items-center border-b border-[#142630] px-3 text-left text-[11px] hover:bg-[#0a1a25] ${selectedId === entry.id ? "bg-[#082238] outline outline-1 outline-[#238ee9] outline-offset-[-1px]" : ""}`}>
-                  <span className="font-mono text-[#9baab7]">{new Date(entry.created_at).toLocaleTimeString([], { hour12: false })}</span>
+                <span className="font-mono text-[#9baab7]">{new Date(entry.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" })} UTC</span>
                   <span className="font-mono text-[#d2dce5]">{entry.symbol ?? "—"}</span>
                   <StatusLabel status={levelToStatus(entry.level)} />
                   <span className="truncate text-[#d2dce5]">{entry.message}</span>

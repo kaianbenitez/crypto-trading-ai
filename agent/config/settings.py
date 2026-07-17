@@ -1,8 +1,19 @@
+import json
 import os
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from threading import RLock
+
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_RUNTIME_SETTINGS_PATH = Path(
+    os.getenv("RUNTIME_SETTINGS_PATH", str(Path(__file__).resolve().parents[2] / "runtime_settings.json"))
+)
+_RUNTIME_SETTINGS_LOCK = RLock()
+_RUNTIME_SETTINGS_CACHE: dict[str, object] = {"mtime": None, "values": {}}
 
 
 @dataclass
@@ -60,6 +71,7 @@ class Settings:
     slippage_pct: float = float(os.getenv("SLIPPAGE_PCT", "0.03"))
     min_live_ev_r: float = float(os.getenv("MIN_LIVE_EV_R", "0.25"))
     min_edge_after_cost_r: float = float(os.getenv("MIN_EDGE_AFTER_COST_R", "0.15"))
+    news_confidence_nudge_pct: float = float(os.getenv("NEWS_CONFIDENCE_NUDGE_PCT", "0.03"))
 
     # Strategy profile: which modules may affect a trade decision.
     #   baseline_simple (default) — base signal + MTF + cost/risk gates only;
@@ -149,6 +161,24 @@ class Settings:
     market_scan_news_nudge_enabled: bool = os.getenv("MARKET_SCAN_NEWS_NUDGE_ENABLED", "false").lower() == "true"
     market_scan_news_nudge_weight: float = float(os.getenv("MARKET_SCAN_NEWS_NUDGE_WEIGHT", "0.05"))
 
+    # Exit-management defaults for new trades. The orchestrator copies these
+    # into each trade's parameter snapshot so the Settings page can tune
+    # partial TP and trailing behavior without editing code.
+    enable_partial_take_profit: bool = os.getenv("ENABLE_PARTIAL_TAKE_PROFIT", "true").lower() == "true"
+    partial_take_profit_pct: float = float(os.getenv("PARTIAL_TAKE_PROFIT_PCT", "0.33"))
+    partial_take_profit_r: float = float(os.getenv("PARTIAL_TAKE_PROFIT_R", "1.5"))
+    enable_trailing_take_profit: bool = os.getenv("ENABLE_TRAILING_TAKE_PROFIT", "true").lower() == "true"
+    trail_activation_r: float = float(os.getenv("TRAIL_ACTIVATION_R", "1.0"))
+    trail_atr_mult: float = float(os.getenv("TRAIL_ATR_MULT", "2.2"))
+    trail_high_vol_atr_ratio: float = float(os.getenv("TRAIL_HIGH_VOL_ATR_RATIO", "1.8"))
+    trail_chandelier_lookback: int = int(os.getenv("TRAIL_CHANDELIER_LOOKBACK", "22"))
+    trail_chandelier_atr_mult: float = float(os.getenv("TRAIL_CHANDELIER_ATR_MULT", "3.0"))
+    trail_structure_lookback: int = int(os.getenv("TRAIL_STRUCTURE_LOOKBACK", "5"))
+    trail_min_move_pct: float = float(os.getenv("TRAIL_MIN_MOVE_PCT", "0.0005"))
+    tp_trail_activation_r: float = float(os.getenv("TP_TRAIL_ACTIVATION_R", "1.6"))
+    tp_trail_min_locked_r: float = float(os.getenv("TP_TRAIL_MIN_LOCKED_R", "0.5"))
+    tp_trail_min_ev_r: float = float(os.getenv("TP_TRAIL_MIN_EV_R", "0.35"))
+
     # SMC swing-structure (BOS/CHoCH) — display/alert only, never a gate or
     # confidence input (see agent/analysis/smc_structure.py). Checked on its
     # own cadence per open position, independent of the 60s main loop, since
@@ -206,5 +236,142 @@ class Settings:
     min_net_ev_after_cost_r: float = float(os.getenv("MIN_NET_EV_AFTER_COST_R", "0.25"))
     min_expected_reward_cost_multiple: float = float(os.getenv("MIN_EXPECTED_REWARD_COST_MULTIPLE", "5"))
 
+    _runtime_override_fields = {
+        "bankroll_usdt",
+        "bankroll_mode",
+        "bankroll_compounding",
+        "bankroll_min_usdt",
+        "bankroll_max_usdt",
+        "max_risk_per_trade_pct",
+        "max_daily_drawdown_pct",
+        "max_concurrent_positions",
+        "split_risk_across_slots",
+        "max_portfolio_risk_pct",
+        "max_same_direction_risk_pct",
+        "min_entry_risk_pct",
+        "min_stop_cost_multiple",
+        "default_leverage",
+        "max_leverage",
+        "daily_drawdown_mode",
+        "confidence_risk_scaling",
+        "confidence_full_risk_at",
+        "taker_fee_pct",
+        "slippage_pct",
+        "min_live_ev_r",
+        "min_edge_after_cost_r",
+        "news_confidence_nudge_pct",
+        "strategy_profile",
+        "risk_tier_mode",
+        "risk_base_pct",
+        "risk_recovery_pct",
+        "risk_drawdown_pct",
+        "risk_proven_pct",
+        "risk_recovery_drawdown_pct",
+        "risk_drawdown_trigger_pct",
+        "risk_proven_min_trades",
+        "risk_proven_min_expectancy_r",
+        "risk_proven_min_net_r_after_cost",
+        "risk_proven_min_profit_factor",
+        "risk_proven_max_drawdown_pct",
+        "risk_proven_min_symbols",
+        "risk_proven_max_top_coin_pct",
+        "risk_proven_min_days",
+        "risk_proven_min_trades_per_leg",
+        "risk_recovery_loss_streak_trigger",
+        "reentry_max_trades_per_symbol_per_day",
+        "reentry_min_ev_multiplier",
+        "coin_digest_hour_ph",
+        "news_enabled",
+        "news_provider",
+        "telegram_show_close_lessons",
+        "dynamic_market_scan",
+        "market_scan_top_n",
+        "market_scan_active_symbols",
+        "market_scan_min_quote_volume",
+        "market_scan_max_spread_pct",
+        "market_scan_refresh_minutes",
+        "market_scan_exclude_symbols",
+        "market_scan_include_fixed_majors",
+        "market_scan_fixed_majors",
+        "market_scan_require_market_cap_rank",
+        "market_scan_min_market_cap_rank",
+        "market_scan_use_mainnet_liquidity",
+        "market_scan_max_abs_24h_change_pct",
+        "market_scan_news_nudge_enabled",
+        "market_scan_news_nudge_weight",
+        "enable_partial_take_profit",
+        "partial_take_profit_pct",
+        "partial_take_profit_r",
+        "enable_trailing_take_profit",
+        "trail_activation_r",
+        "trail_atr_mult",
+        "trail_high_vol_atr_ratio",
+        "trail_chandelier_lookback",
+        "trail_chandelier_atr_mult",
+        "trail_structure_lookback",
+        "trail_min_move_pct",
+        "tp_trail_activation_r",
+        "tp_trail_min_locked_r",
+        "tp_trail_min_ev_r",
+    }
+
+    def __getattribute__(self, name: str):
+        if name not in {"_runtime_override_fields", "_load_runtime_overrides", "runtime_snapshot", "__dict__", "__class__"}:
+            try:
+                override_fields = object.__getattribute__(self, "_runtime_override_fields")
+                if name in override_fields:
+                    overrides = object.__getattribute__(self, "_load_runtime_overrides")()
+                    if name in overrides:
+                        return overrides[name]
+            except Exception:
+                pass
+        return object.__getattribute__(self, name)
+
+    def _load_runtime_overrides(self) -> dict[str, object]:
+        path = _RUNTIME_SETTINGS_PATH
+        try:
+            mtime = path.stat().st_mtime
+        except FileNotFoundError:
+            with _RUNTIME_SETTINGS_LOCK:
+                _RUNTIME_SETTINGS_CACHE["mtime"] = None
+                _RUNTIME_SETTINGS_CACHE["values"] = {}
+            return {}
+
+        with _RUNTIME_SETTINGS_LOCK:
+            if _RUNTIME_SETTINGS_CACHE["mtime"] == mtime:
+                return dict(_RUNTIME_SETTINGS_CACHE["values"])
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                values = payload.get("values", payload) if isinstance(payload, dict) else {}
+                if not isinstance(values, dict):
+                    values = {}
+            except Exception:
+                values = {}
+            _RUNTIME_SETTINGS_CACHE["mtime"] = mtime
+            _RUNTIME_SETTINGS_CACHE["values"] = dict(values)
+            return dict(values)
+
+    def runtime_snapshot(self) -> dict[str, object]:
+        return {name: getattr(self, name) for name in sorted(self._runtime_override_fields)}
+
 
 settings = Settings()
+
+
+def save_runtime_overrides(values: dict[str, object]) -> None:
+    clean = {k: v for k, v in values.items() if k in settings._runtime_override_fields}
+    payload = {
+        "updated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "values": clean,
+    }
+    _RUNTIME_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = _RUNTIME_SETTINGS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(_RUNTIME_SETTINGS_PATH)
+    with _RUNTIME_SETTINGS_LOCK:
+        _RUNTIME_SETTINGS_CACHE["mtime"] = None
+        _RUNTIME_SETTINGS_CACHE["values"] = dict(clean)
+
+
+def load_runtime_overrides() -> dict[str, object]:
+    return settings._load_runtime_overrides()

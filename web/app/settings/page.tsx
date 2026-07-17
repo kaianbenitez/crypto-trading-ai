@@ -1,146 +1,381 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Bell, MagnifyingGlass, ShieldWarning, TelegramLogo, Warning } from "@phosphor-icons/react";
-import { api, AgentStatus, RosterInfo, StrategyProfile } from "@/lib/api";
+import { Bell, Flask, ShieldWarning, Warning } from "@phosphor-icons/react";
+import { api, AgentStatus, RosterInfo, SettingsSnapshot, StrategyProfile } from "@/lib/api";
 
-const services = ["Agent", "Exchange API", "Dashboard", "Database", "Nginx"];
+type DraftValue = string | number | boolean;
 
-function Row({ icon, title, subtitle, children }: { icon: React.ReactNode; title: string; subtitle: string; children: React.ReactNode }) {
+type FieldDef =
+  | { key: string; label: string; type: "number"; step?: number; min?: number; max?: number; hint?: string }
+  | { key: string; label: string; type: "text"; hint?: string }
+  | { key: string; label: string; type: "select"; options: string[]; hint?: string }
+  | { key: string; label: string; type: "checkbox"; hint?: string };
+
+type SectionDef = { title: string; description: string; fields: FieldDef[] };
+
+const SECTIONS: SectionDef[] = [
+  {
+    title: "Bankroll & risk",
+    description: "Live bankroll source, trade sizing, drawdown caps, and risk tiers.",
+    fields: [
+      { key: "bankroll_usdt", label: "Bankroll (USDT)", type: "number", step: 1, min: 0, hint: "Base capital used by risk validation." },
+      { key: "bankroll_mode", label: "Bankroll mode", type: "select", options: ["static", "equity"], hint: "Static uses the configured bankroll; equity follows the exchange." },
+      { key: "max_risk_per_trade_pct", label: "Max risk per trade (%)", type: "number", step: 0.1, min: 0 },
+      { key: "max_concurrent_positions", label: "Max concurrent positions", type: "number", step: 1, min: 0 },
+      { key: "split_risk_across_slots", label: "Split risk across slots", type: "checkbox" },
+      { key: "max_portfolio_risk_pct", label: "Portfolio risk cap (%)", type: "number", step: 0.1, min: 0 },
+      { key: "max_same_direction_risk_pct", label: "Same-direction risk cap (%)", type: "number", step: 0.1, min: 0 },
+      { key: "min_entry_risk_pct", label: "Minimum entry risk (%)", type: "number", step: 0.05, min: 0 },
+      { key: "default_leverage", label: "Default leverage", type: "number", step: 1, min: 1 },
+      { key: "max_leverage", label: "Max leverage", type: "number", step: 1, min: 1 },
+      { key: "confidence_risk_scaling", label: "Scale risk by confidence", type: "checkbox" },
+      { key: "confidence_full_risk_at", label: "Full-risk confidence", type: "number", step: 0.01, min: 0, max: 1 },
+      { key: "max_daily_drawdown_pct", label: "Daily drawdown cap (%)", type: "number", step: 0.1, min: 0 },
+      { key: "risk_tier_mode", label: "Risk tier mode", type: "select", options: ["auto", "fixed"] },
+      { key: "risk_base_pct", label: "Base risk (%)", type: "number", step: 0.1, min: 0 },
+      { key: "risk_recovery_pct", label: "Recovery risk (%)", type: "number", step: 0.1, min: 0 },
+      { key: "risk_drawdown_pct", label: "Drawdown risk (%)", type: "number", step: 0.1, min: 0 },
+      { key: "risk_proven_pct", label: "Proven risk (%)", type: "number", step: 0.1, min: 0 },
+      { key: "risk_proven_min_days", label: "Validation days", type: "number", step: 1, min: 1 },
+      { key: "risk_proven_min_trades", label: "Validation trades", type: "number", step: 1, min: 1 },
+      { key: "risk_proven_min_expectancy_r", label: "Min expectancy (R)", type: "number", step: 0.01 },
+      { key: "risk_proven_min_net_r_after_cost", label: "Min net EV after cost (R)", type: "number", step: 0.01 },
+      { key: "risk_proven_min_profit_factor", label: "Min profit factor", type: "number", step: 0.01, min: 0 },
+      { key: "risk_proven_max_drawdown_pct", label: "Max drawdown (%)", type: "number", step: 0.1, min: 0 },
+      { key: "risk_recovery_loss_streak_trigger", label: "Recovery loss streak", type: "number", step: 1, min: 1 },
+      { key: "reentry_max_trades_per_symbol_per_day", label: "Re-entry cap per symbol/day", type: "number", step: 1, min: 0 },
+      { key: "reentry_min_ev_multiplier", label: "Re-entry EV multiplier", type: "number", step: 0.1, min: 0 },
+    ],
+  },
+  {
+    title: "Scanner & roster",
+    description: "Universe scan, shortlist sizing, filters, and coin coverage.",
+    fields: [
+      { key: "dynamic_market_scan", label: "Dynamic market scan", type: "checkbox" },
+      { key: "market_scan_top_n", label: "Shortlist size", type: "number", step: 1, min: 1 },
+      { key: "market_scan_active_symbols", label: "Active roster size", type: "number", step: 1, min: 1 },
+      { key: "market_scan_refresh_minutes", label: "Scan refresh (min)", type: "number", step: 1, min: 1 },
+      { key: "market_scan_min_quote_volume", label: "Min quote volume", type: "number", step: 1, min: 0 },
+      { key: "market_scan_max_spread_pct", label: "Max spread (%)", type: "number", step: 0.01, min: 0 },
+      { key: "market_scan_max_abs_24h_change_pct", label: "Max 24h move (%)", type: "number", step: 0.1, min: 0 },
+      { key: "market_scan_include_fixed_majors", label: "Pin fixed majors", type: "checkbox" },
+      { key: "market_scan_fixed_majors", label: "Fixed majors", type: "text", hint: "Comma-separated symbols, e.g. BTC/USDT,ETH/USDT,SOL/USDT" },
+      { key: "market_scan_require_market_cap_rank", label: "Require market-cap rank", type: "checkbox" },
+      { key: "market_scan_min_market_cap_rank", label: "Min market-cap rank", type: "number", step: 1, min: 1 },
+      { key: "market_scan_use_mainnet_liquidity", label: "Use mainnet liquidity", type: "checkbox" },
+      { key: "market_scan_exclude_symbols", label: "Excluded symbols", type: "text", hint: "Comma-separated symbols to skip." },
+      { key: "market_scan_news_nudge_enabled", label: "News nudges shortlist", type: "checkbox" },
+      { key: "market_scan_news_nudge_weight", label: "News shortlist weight", type: "number", step: 0.01, min: 0 },
+    ],
+  },
+  {
+    title: "Strategy & exits",
+    description: "Active profile, partial take-profit, and trailing behavior.",
+    fields: [
+      { key: "strategy_profile", label: "Strategy profile", type: "select", options: ["baseline_simple", "guarded_agentic", "full_agentic", "smc_observe", "memory_observe"] },
+      { key: "enable_partial_take_profit", label: "Enable partial TP", type: "checkbox" },
+      { key: "partial_take_profit_pct", label: "Partial TP size", type: "number", step: 0.01, min: 0, max: 1 },
+      { key: "partial_take_profit_r", label: "Partial TP at (R)", type: "number", step: 0.01, min: 0 },
+      { key: "enable_trailing_take_profit", label: "Enable trailing TP", type: "checkbox" },
+      { key: "tp_trail_activation_r", label: "TP trail activation (R)", type: "number", step: 0.01, min: 0 },
+      { key: "tp_trail_min_locked_r", label: "Min locked R", type: "number", step: 0.01, min: 0 },
+      { key: "tp_trail_min_ev_r", label: "Min EV for runner", type: "number", step: 0.01, min: 0 },
+      { key: "trail_activation_r", label: "Stop trail activation (R)", type: "number", step: 0.01, min: 0 },
+      { key: "trail_atr_mult", label: "ATR trail multiplier", type: "number", step: 0.1, min: 0 },
+      { key: "trail_high_vol_atr_ratio", label: "High-vol ATR ratio", type: "number", step: 0.1, min: 0 },
+      { key: "trail_chandelier_lookback", label: "Chandelier lookback", type: "number", step: 1, min: 1 },
+      { key: "trail_chandelier_atr_mult", label: "Chandelier ATR multiplier", type: "number", step: 0.1, min: 0 },
+      { key: "trail_structure_lookback", label: "Structure lookback", type: "number", step: 1, min: 1 },
+      { key: "trail_min_move_pct", label: "Min stop move (%)", type: "number", step: 0.0001, min: 0 },
+    ],
+  },
+  {
+    title: "News & alerts",
+    description: "Sentiment nudges, Telegram behavior, and feed selection.",
+    fields: [
+      { key: "news_enabled", label: "Enable news", type: "checkbox" },
+      { key: "news_provider", label: "News provider", type: "text" },
+      { key: "news_confidence_nudge_pct", label: "News confidence nudge (%)", type: "number", step: 0.01, min: 0 },
+      { key: "telegram_show_close_lessons", label: "Send close lessons in Telegram", type: "checkbox" },
+      { key: "coin_digest_hour_ph", label: "Daily digest hour (PH)", type: "number", step: 1, min: 0, max: 23 },
+    ],
+  },
+];
+
+function toDraftValue(field: FieldDef, value: unknown): DraftValue {
+  if (field.type === "checkbox") return Boolean(value);
+  if (typeof value === "number" || typeof value === "string") return value;
+  return field.type === "number" ? 0 : "";
+}
+
+function parseDraftValue(field: FieldDef, value: DraftValue): DraftValue {
+  if (field.type === "checkbox") return Boolean(value);
+  if (field.type === "number") {
+    const num = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(num) ? num : 0;
+  }
+  return String(value ?? "");
+}
+
+function FieldEditor({
+  field,
+  value,
+  onChange,
+}: {
+  field: FieldDef;
+  value: DraftValue;
+  onChange: (key: string, value: DraftValue) => void;
+}) {
+  const base = "mt-2 w-full border border-[#304250] bg-[#09131a] px-3 py-2 text-[12px] text-[#dbe6ef] outline-none transition focus:border-[#3b8cff]";
+  const label = <div className="text-[12px] font-semibold text-[#dce5ed]">{field.label}</div>;
+  const hint = field.hint ? <div className="mt-1 text-[10px] text-[#8091a0]">{field.hint}</div> : null;
+
   return (
-    <section className="flex min-h-[92px] items-center gap-5 border-b border-[#20303a] px-7 py-5">
-      <div className="grid w-9 place-items-center text-[#dce5ed]">{icon}</div>
-      <div className="w-[280px]">
-        <h2 className="text-[14px] font-semibold text-[#e3eaf0]">{title}</h2>
-        <p className="mt-1 text-[11px] text-[#82929d]">{subtitle}</p>
+    <label className="block">
+      {label}
+      {field.type === "checkbox" ? (
+        <div className="mt-2 flex items-center gap-3 rounded border border-[#304250] bg-[#09131a] px-3 py-2">
+          <input
+            type="checkbox"
+            checked={Boolean(value)}
+            onChange={(e) => onChange(field.key, e.target.checked)}
+            className="h-4 w-4 accent-[#3b8cff]"
+          />
+          <span className="text-[12px] text-[#b8c6d0]">{Boolean(value) ? "Enabled" : "Disabled"}</span>
+        </div>
+      ) : field.type === "select" ? (
+        <select
+          value={String(value ?? "")}
+          onChange={(e) => onChange(field.key, e.target.value)}
+          className={base}
+        >
+          {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
+        </select>
+      ) : field.type === "number" ? (
+        <input
+          type="number"
+          step={field.step ?? 1}
+          min={field.min}
+          max={field.max}
+          value={typeof value === "number" ? value : Number(value || 0)}
+          onChange={(e) => onChange(field.key, e.target.value === "" ? 0 : Number(e.target.value))}
+          className={base}
+        />
+      ) : (
+        <input
+          type="text"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(field.key, e.target.value)}
+          className={base}
+        />
+      )}
+      {hint}
+    </label>
+  );
+}
+
+function SectionCard({
+  section,
+  draft,
+  onChange,
+}: {
+  section: SectionDef;
+  draft: Record<string, DraftValue>;
+  onChange: (key: string, value: DraftValue) => void;
+}) {
+  return (
+    <section className="border border-[#1a303b] bg-[#071118]">
+      <div className="border-b border-[#1a303b] px-4 py-3">
+        <h2 className="text-[13px] font-semibold">{section.title}</h2>
+        <p className="mt-1 text-[10px] text-[#8595a1]">{section.description}</p>
       </div>
-      <div className="flex flex-1 items-center justify-between gap-8">{children}</div>
+      <div className="grid grid-cols-2 gap-4 px-4 py-4">
+        {section.fields.map((field) => (
+          <FieldEditor
+            key={field.key}
+            field={field}
+            value={draft[field.key] ?? (field.type === "checkbox" ? false : field.type === "number" ? 0 : "")}
+            onChange={onChange}
+          />
+        ))}
+      </div>
     </section>
   );
 }
 
-export default function SettingsPage() {
-  const [halted, setHalted] = useState(false);
-  const [haltPending, setHaltPending] = useState(false);
+function SettingsPageContent() {
   const [agent, setAgent] = useState<AgentStatus | null>(null);
-  const [statusError, setStatusError] = useState(false);
   const [roster, setRoster] = useState<RosterInfo | null>(null);
   const [profile, setProfile] = useState<StrategyProfile | null>(null);
+  const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null);
+  const [draft, setDraft] = useState<Record<string, DraftValue>>({});
+  const [statusError, setStatusError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     const load = () => {
-      api.agentStatus().then((next) => { if (active) { setAgent(next); setStatusError(false); setHalted(Boolean(next.kill_switch_active)); } }).catch(() => active && setStatusError(true));
-      api.roster().then((next) => active && setRoster(next)).catch(() => {});
-      api.strategyProfile().then((next) => active && setProfile(next)).catch(() => {});
+      Promise.all([api.agentStatus(), api.roster(), api.strategyProfile(), api.settings()])
+        .then(([nextAgent, nextRoster, nextProfile, nextSnapshot]) => {
+          if (!active) return;
+          setAgent(nextAgent);
+          setRoster(nextRoster);
+          setProfile(nextProfile);
+          setSnapshot(nextSnapshot);
+          const nextDraft: Record<string, DraftValue> = {};
+          for (const section of SECTIONS) {
+            for (const field of section.fields) {
+              nextDraft[field.key] = toDraftValue(field, nextSnapshot.values[field.key]);
+            }
+          }
+          setDraft(nextDraft);
+          setStatusError(false);
+          setMessage(null);
+        })
+        .catch(() => active && setStatusError(true));
     };
     load();
-    const timer = window.setInterval(load, 10000);
+    const timer = window.setInterval(load, 15000);
     return () => { active = false; window.clearInterval(timer); };
   }, []);
 
-  const onHalt = () => {
-    setHaltPending(true);
-    api.setKillSwitch(!halted, !halted ? "Manual halt from settings" : "Manual resume from settings")
-      .then((res) => setHalted(res.kill_switch_active))
-      .catch(() => setStatusError(true))
-      .finally(() => setHaltPending(false));
+  const summaryPills = useMemo(() => [
+    { label: "Editable groups", value: String(SECTIONS.length) },
+    { label: "Dynamic roster", value: String(roster?.active?.length ?? 0) },
+    { label: "Active profile", value: profile?.profile ?? "—" },
+    { label: "News", value: agent?.testnet ? "Testnet" : "Live" },
+  ], [agent, profile, roster]);
+
+  const onChange = (key: string, value: DraftValue) => {
+    setDraft((current) => ({ ...current, [key]: value }));
   };
 
-  const anyServiceError = agent ? Object.values(agent).some((value) => value === "error") : false;
+  const onSave = async () => {
+    setSaving(true);
+    try {
+      const payload: Record<string, DraftValue> = {};
+      for (const section of SECTIONS) {
+        for (const field of section.fields) {
+          payload[field.key] = parseDraftValue(field, draft[field.key] ?? (field.type === "checkbox" ? false : ""));
+        }
+      }
+      const result = await api.updateSettings(payload);
+      setSnapshot({ updated_at: result.updated_at, values: result.values });
+      setMessage("Saved to runtime_settings.json. Live code will pick it up on the next read.");
+    } catch {
+      setMessage("Could not save settings.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onReset = () => {
+    if (!snapshot) return;
+    const nextDraft: Record<string, DraftValue> = {};
+    for (const section of SECTIONS) {
+      for (const field of section.fields) {
+        nextDraft[field.key] = toDraftValue(field, snapshot.values[field.key]);
+      }
+    }
+    setDraft(nextDraft);
+    setMessage("Reset to the last loaded runtime snapshot.");
+  };
 
   return (
-    <div className="min-h-screen min-w-[1186px] bg-[#04090e] text-[#dce5ed]">
-      <main className="flex min-h-screen flex-col">
-        <header className="flex h-[70px] items-center justify-between border-b border-[#1a2b35] px-8">
-          <h1 className="text-[22px] font-semibold">Settings</h1>
-          <div className="flex items-center gap-7 text-[11px]">
+    <div className="min-h-screen bg-[#04090e] text-[#dce5ed]">
+      <main className="px-6 py-6">
+        <header className="flex items-start justify-between gap-6">
+          <div>
+            <h1 className="text-[22px] font-semibold">Settings</h1>
+            <p className="mt-1 text-[12px] text-[#8495a3]">Live settings editor for risk, scanner, strategy, and alert behavior.</p>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] text-[#9ba8b4]">
             <span>Environment <b className="ml-2 rounded bg-[#164d2d] px-2 py-1 text-[#6ee392]">{agent?.testnet === false ? "LIVE" : "TESTNET"}</b></span>
             <span>Health <b className={statusError ? "ml-2 text-[#e4b63e]" : "ml-2 text-[#6ee392]"}>● {statusError ? "API UNAVAILABLE" : "ALL SYSTEMS OPERATIONAL"}</b></span>
             <Bell size={18} />
           </div>
         </header>
-        <div className="min-w-0 flex-1 px-7">
-          <Row icon={<ShieldWarning size={29} />} title="Trading Mode" subtitle="Environment for order execution — set via server config, not switchable here.">
-            <div className="flex h-11 w-[310px] items-center border border-[#67d649] px-4 text-[13px] font-semibold text-[#70e94e]">
-              {agent?.testnet === false ? "LIVE" : "TESTNET"}
+
+        <section className="mt-4 grid grid-cols-4 border border-[#1c303b] bg-[#071118]">
+          {summaryPills.map((pill, index) => (
+            <div key={pill.label} className={`border-r border-[#1c303b] px-4 py-3 ${index === 0 ? "border-t-2 border-t-[#3186ff]" : ""} last:border-r-0`}>
+              <div className="text-[10px] text-[#9aa8b2]">{pill.label}</div>
+              <div className="mt-2 text-[18px] font-semibold">{pill.value}</div>
             </div>
-            <p className="w-[370px] text-[12px] text-[#9aa8b2]">Switching modes requires a config change and restart on the server — not exposed here to avoid an accidental live-mode flip.</p>
-          </Row>
-          <Row icon={<span className="text-[30px] text-[#f0b52d]">◆</span>} title="Exchange Connection" subtitle="Live status of the exchange connection.">
-            <div className="flex flex-1 items-center gap-8 text-[12px]">
-              <div>
-                <span className="block text-[#83939f]">Exchange</span>
-                <b>{agent?.exchange === "ok" ? "Connected" : "Checking"} <small className={`rounded px-2 py-1 ${agent?.exchange === "ok" ? "bg-[#164429] text-[#59dc81]" : "bg-[#3a2a12] text-[#e2b33d]"}`}>{agent?.exchange === "ok" ? "OK" : "CHECKING"}</small></b>
-              </div>
-              <div>
-                <span className="block text-[#83939f]">Symbols tracked</span>
-                <b>{agent?.symbols?.length ?? "—"}</b>
-              </div>
+          ))}
+        </section>
+
+        <section className="mt-4 border border-[#1a303b] bg-[#071118]">
+          <div className="flex items-center justify-between border-b border-[#1a303b] px-4 py-3">
+            <div>
+              <h2 className="text-[13px] font-semibold">What you can configure here</h2>
+              <p className="mt-1 text-[10px] text-[#8495a3]">These controls persist to the runtime settings file. No API credentials or exchange keys are edited here.</p>
             </div>
-          </Row>
-          <Row icon={<TelegramLogo size={30} weight="fill" color="#4ca9f0" />} title="Telegram Notifications" subtitle="Alerts are configured via the server .env — not yet editable from this dashboard.">
-            <p className="flex-1 text-[12px] text-[#9aa8b2]">Trade open/close, CHoCH structure alerts, and daily summaries are sent per the bot&apos;s current config. To change what&apos;s sent, update the VPS <code>.env</code> directly.</p>
-          </Row>
-          <Row icon={<span className="grid h-7 w-7 place-items-center rounded-full border-2 border-[#dce5ed] text-[13px]">⊙</span>} title="Strategy Profile" subtitle="Active decision profile — see the Strategy page for full detail.">
-            <div className="flex flex-1 items-center gap-6 text-[12px]">
-              <div>
-                <span className="block text-[#83939f]">Active profile</span>
-                <b className="text-[14px] text-[#43aaff]">{profile?.profile ?? "—"}</b>
-              </div>
-              <div>
-                <span className="block text-[#83939f]">Decision-active modules</span>
-                <b>{profile?.decision_active?.length ?? "—"}</b>
-              </div>
-              <div>
-                <span className="block text-[#83939f]">Observe-only modules</span>
-                <b>{profile?.observe_only?.length ?? "—"}</b>
-              </div>
+            <div className="flex items-center gap-3 text-[11px]">
+              <button onClick={onReset} className="border border-[#304250] px-3 py-2 text-[#dbe5ed]">Reset</button>
+              <button onClick={onSave} disabled={saving} className="border border-[#3b8cff] bg-[#0c2440] px-3 py-2 text-[#7fc7ff] disabled:opacity-50">{saving ? "Saving…" : "Save settings"}</button>
             </div>
-            <Link href="/strategy" className="text-[12px] text-[#c0ccd3]">View on Strategy page ›</Link>
-          </Row>
-          <Row icon={<MagnifyingGlass size={29} />} title="Scanner Settings" subtitle="Live roster scan status.">
-            <div className="flex gap-10 text-[12px]">
-              <div>
-                <span className="block text-[#83939f]">Scan status</span>
-                <b>{roster?.scan?.status ?? "—"}</b>
-              </div>
-              <div>
-                <span className="block text-[#83939f]">Active roster size</span>
-                <b>{roster?.active?.length ?? "—"}</b>
-              </div>
-              <div>
-                <span className="block text-[#83939f]">Benched coins</span>
-                <b>{roster?.benched?.length ?? "—"}</b>
-              </div>
+          </div>
+          {message && <div className="border-b border-[#1a303b] px-4 py-2 text-[11px] text-[#eab83c]">{message}</div>}
+          <div className="grid gap-4 p-4">
+            {SECTIONS.map((section) => <SectionCard key={section.title} section={section} draft={draft} onChange={onChange} />)}
+          </div>
+        </section>
+
+        <div className="mt-4 grid grid-cols-[1.2fr_1fr] gap-4">
+          <section className="border border-[#1a303b] bg-[#071118] p-4">
+            <div className="flex items-center gap-3">
+              <ShieldWarning size={18} />
+              <h2 className="text-[13px] font-semibold">Live roster snapshot</h2>
             </div>
-          </Row>
-          <Row icon={<span className="text-[25px]">⌁</span>} title="Services Health" subtitle="Real-time status of system services.">
-            <div className="flex flex-1 justify-between">
-              {services.map((service) => (
-                <div key={service} className="text-center text-[11px]">
-                  <b className={anyServiceError ? "text-[#ff646b]" : "text-[#55df82]"}>● {service}</b>
-                  <span className="mt-1 block text-[#55df82]">{anyServiceError ? "Check" : "Healthy"}</span>
-                </div>
-              ))}
-            </div>
-            <Link href="/log" className="text-[12px] text-[#c0ccd3]">View Logs ↗</Link>
-          </Row>
-          <section className="flex min-h-[110px] items-center gap-5 border-t border-[#47272a] px-7 py-5">
-            <Warning size={31} color="#ff555e" />
-            <div className="w-[250px]">
-              <h2 className="text-[14px] font-semibold text-[#ff686d]">Danger Zone</h2>
-              <p className="mt-1 text-[11px] text-[#8796a0]">Critical actions. Proceed with caution.</p>
-            </div>
-            <div className="flex flex-1 items-start gap-3">
-              <button onClick={onHalt} disabled={haltPending} className="border border-[#d93643] px-4 py-3 text-[11px] text-[#ff6168] disabled:opacity-50">
-                Ⅱ {haltPending ? "Working…" : halted ? "Resume entries" : "Halt new entries"}
-              </button>
+            <div className="mt-4 grid grid-cols-3 gap-3 text-[11px]">
+              <div className="rounded border border-[#213443] bg-[#09131a] p-3">
+                <div className="text-[#82939f]">Shortlisted</div>
+                <div className="mt-2 text-[18px] font-semibold text-[#45dd84]">{roster?.active.length ?? "—"}</div>
+              </div>
+              <div className="rounded border border-[#213443] bg-[#09131a] p-3">
+                <div className="text-[#82939f]">Benched</div>
+                <div className="mt-2 text-[18px] font-semibold">{roster?.benched.length ?? "—"}</div>
+              </div>
+              <div className="rounded border border-[#213443] bg-[#09131a] p-3">
+                <div className="text-[#82939f]">Scanner</div>
+                <div className="mt-2 text-[18px] font-semibold">{roster?.scan.status ?? "—"}</div>
+              </div>
             </div>
           </section>
+
+          <section className="border border-[#1a303b] bg-[#071118] p-4">
+            <div className="flex items-center gap-3">
+              <Flask size={18} />
+              <h2 className="text-[13px] font-semibold">Current live profile</h2>
+            </div>
+            <div className="mt-4 grid gap-3 text-[11px]">
+              <div><span className="text-[#82939f]">Active profile:</span> <b className="text-[#43aaff]">{profile?.profile ?? "—"}</b></div>
+              <div><span className="text-[#82939f]">Decision-active modules:</span> <b>{profile?.decision_active.length ?? "—"}</b></div>
+              <div><span className="text-[#82939f]">Observe-only modules:</span> <b>{profile?.observe_only.length ?? "—"}</b></div>
+              <div><span className="text-[#82939f]">Telegram close lessons:</span> <b>{String(Boolean(draft.telegram_show_close_lessons))}</b></div>
+            </div>
+            <Link href="/strategy" className="mt-4 inline-flex text-[11px] text-[#7fc7ff]">Open strategy breakdown →</Link>
+          </section>
         </div>
+
+        <section className="mt-4 border border-[#47272a] bg-[#2a1012] p-4">
+          <div className="flex items-center gap-3">
+            <Warning size={18} color="#ff555e" />
+            <div>
+              <h2 className="text-[13px] font-semibold text-[#ff7a7f]">Danger zone</h2>
+              <p className="mt-1 text-[11px] text-[#c18f95]">Kill-switch actions still happen elsewhere on the dashboard. Settings here only covers runtime configuration.</p>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
   );
+}
+
+export default function SettingsPage() {
+  return <SettingsPageContent />;
 }

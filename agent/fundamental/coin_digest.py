@@ -186,12 +186,13 @@ def apply_sentiment_adjustment(symbol: str, signal, session) -> float:
         (signal.side.value == "long" and sentiment.label == "negative")
         or (signal.side.value == "short" and sentiment.label == "positive")
     )
+    cap = min(abs(float(getattr(settings, "news_confidence_nudge_pct", 0.03) or 0.03)), 0.05)
     if aligned:
-        signal.reasoning.append(f"News sentiment {sentiment.label} — small confidence boost")
-        return 0.05
+        signal.reasoning.append(f"News sentiment {sentiment.label} — small confidence boost ({cap:+.2f})")
+        return cap
     if opposed:
-        signal.reasoning.append(f"News sentiment {sentiment.label} — confidence reduced")
-        return -0.05
+        signal.reasoning.append(f"News sentiment {sentiment.label} — confidence reduced ({-cap:+.2f})")
+        return -cap
     return 0.0
 
 

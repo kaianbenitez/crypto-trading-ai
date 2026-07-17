@@ -85,3 +85,37 @@ class AgentStatusOut(BaseModel):
     symbols: list[str]
     bankroll_usdt: float
     checked_at: str
+
+
+class SettingsSnapshotOut(BaseModel):
+    updated_at: datetime | None
+    values: dict[str, object]
+
+
+class SettingsUpdateRequest(BaseModel):
+    values: dict[str, object]
+
+
+class SettingsUpdateOut(BaseModel):
+    ok: bool
+    updated_at: datetime | None
+    values: dict[str, object]
+
+
+class InsightItemOut(BaseModel):
+    title: str
+    value: str
+    note: str
+    tone: str | None = None
+
+
+class InsightsOut(BaseModel):
+    generated_at: datetime
+    summary: dict[str, object]
+    risk: dict[str, object]
+    validation: dict[str, object]
+    scan: dict[str, object]
+    trading: dict[str, object]
+    signals: list[InsightItemOut]
+    recommendations: list[str]
+    recent_activity: list[dict[str, object]]

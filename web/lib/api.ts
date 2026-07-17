@@ -86,6 +86,10 @@ export interface TradeNarrative {
   held_duration: string | null;
   lesson_line: string | null;
   failure_line: string | null;
+  mfe_r?: number | null;
+  mae_r?: number | null;
+  mfe_price?: number | null;
+  mae_price?: number | null;
 }
 
 export interface OpenPositionDetail {
@@ -221,6 +225,15 @@ export interface Validation {
   };
   metrics: PerformanceMetrics;
   readiness: Readiness;
+  metrics_fixed_window?: PerformanceMetrics;
+  readiness_fixed_window?: Readiness;
+  validation?: {
+    validation_started_at: string;
+    days_elapsed: number;
+    days_remaining: number;
+    min_days_required: number;
+    leg_readiness: Record<string, { closed_count: number; ready: boolean; failed: string[] }>;
+  };
 }
 
 export interface CoinBrain {
@@ -270,6 +283,36 @@ export interface StrategyProfile {
   profile: string;
   decision_active: string[];
   observe_only: string[];
+}
+
+export interface SettingsSnapshot {
+  updated_at: string | null;
+  values: Record<string, unknown>;
+}
+
+export interface SettingsUpdateResult {
+  ok: boolean;
+  updated_at: string | null;
+  values: Record<string, unknown>;
+}
+
+export interface InsightItem {
+  title: string;
+  value: string;
+  note: string;
+  tone?: string | null;
+}
+
+export interface InsightsPayload {
+  generated_at: string;
+  summary: Record<string, unknown>;
+  risk: Record<string, unknown>;
+  validation: Record<string, unknown>;
+  scan: RosterInfo;
+  trading: Record<string, unknown>;
+  signals: InsightItem[];
+  recommendations: string[];
+  recent_activity: ActivityLogEntry[];
 }
 
 export interface StrategyOverview {
@@ -412,8 +455,12 @@ export const api = {
   adaptiveActivity: (limit = 50) => request<AdaptiveActivityEntry[]>(`/api/adaptive-activity?limit=${limit}`),
   roster: () => request<RosterInfo>("/api/roster"),
   newsStatus: () => request<NewsStatus>("/api/news-status"),
+  settings: () => request<SettingsSnapshot>("/api/settings"),
+  updateSettings: (values: Record<string, unknown>) =>
+    request<SettingsUpdateResult>("/api/settings", { method: "PUT", body: JSON.stringify({ values }) }),
   strategyProfile: () => request<StrategyProfile>("/api/strategy-profile"),
   strategy: () => request<StrategyOverview>("/api/strategy"),
+  insights: () => request<InsightsPayload>("/api/insights"),
   changelog: () => request<Changelog>("/api/changelog"),
   activityLog: (limit = 200, since?: string) =>
     request<ActivityLogEntry[]>(`/api/activity-log?limit=${limit}${since ? `&since=${encodeURIComponent(since)}` : ""}`),

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { MagnifyingGlass, X } from "@phosphor-icons/react";
+import CoinLogo from "../components/CoinLogo";
 import { api, CoinDigest, RosterInfo } from "@/lib/api";
 
 type Row = { symbol: string; state: "SHORTLISTED" | "BENCHED"; benchedUntil: string | null; digest: CoinDigest | null };
@@ -14,8 +15,6 @@ const stateClass: Record<Row["state"], string> = {
 function shortSymbol(value: string) { return value.replace("/USDT:USDT", "").replace("/USDT", "").replace("USDT", ""); }
 function pct(value: number | null | undefined) { return value == null ? "—" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`; }
 function price(value: number | null | undefined) { return value == null ? "—" : value.toLocaleString("en-US", { maximumFractionDigits: value < 1 ? 6 : 2 }); }
-
-function CoinLogo({ symbol }: { symbol: string }) { return <span className="grid h-6 w-6 place-items-center rounded-full bg-[#182a39] text-[10px] font-bold text-[#d9e5ed]">{symbol.slice(0, 1)}</span>; }
 
 function Detail({ row, onClose }: { row: Row | null; onClose: () => void }) {
   if (!row) return <aside className="flex min-h-0 flex-col items-center justify-center border-l border-[#1a303d] bg-[#050c12] p-6 text-center text-[11px] text-[#7b8d99]">Select a coin to see its digest.</aside>;
