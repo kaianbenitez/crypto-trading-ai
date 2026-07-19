@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import requests
+from sqlalchemy import text
 
 from agent.config.settings import settings
 from agent.db.models import CommandAudit, TelegramBotState, get_session
@@ -55,6 +56,35 @@ def _set_state(session, key: str, value: str) -> None:
     else:
         session.add(TelegramBotState(key=key, value=value))
     session.commit()
+
+
+def _delete_state(session, key: str) -> None:
+    session.query(TelegramBotState).filter(TelegramBotState.key == key).delete()
+    session.commit()
+
+
+def _claim_state(session, key: str, value: str) -> bool:
+    """Atomically reserve a scheduled-report slot.
+
+    This avoids duplicate sends when the service loop or a second process hits
+    the same report window at the same time. We reserve first, send second.
+    """
+    try:
+        result = session.execute(
+            text(
+                """
+                INSERT INTO telegram_bot_state ("key", value, updated_at)
+                VALUES (:key, :value, CURRENT_TIMESTAMP)
+                ON CONFLICT("key") DO NOTHING
+                """
+            ),
+            {"key": key, "value": value},
+        )
+        session.commit()
+        return bool(getattr(result, "rowcount", 0))
+    except Exception:
+        session.rollback()
+        return False
 
 
 def _audit(session, user_id: str, command: str, args: str, status: str) -> None:
@@ -215,10 +245,21 @@ class TelegramService:
         ]
         for name, key, due, builder in jobs:
             state_key = f"sent:{name}:{key}"
-            if due and _get_state(session, state_key) != "1":
+            if not due:
+                continue
+            if _get_state(session, state_key) == "1":
+                continue
+            if not _claim_state(session, state_key, "pending"):
+                continue
+            try:
                 self.send(builder(session))
                 _set_state(session, state_key, "1")
                 log.info("Sent scheduled report: %s", name)
+            except Exception:
+                # If the send failed, release the reservation so the next
+                # scheduled pass can retry instead of getting stuck forever.
+                _delete_state(session, state_key)
+                raise
 
     def run(self) -> None:
         if not self.enabled:
