@@ -514,6 +514,7 @@ class SymbolState:
             tp_trail_min_ev_r=settings.tp_trail_min_ev_r,
         )
         self.be_armed      = False
+        self.trail_notified = False
         self.tp_trailing_active = False
         self.last_structure_check: datetime | None = None
         self.last_alerted_choch_at: datetime | None = None  # candle timestamp of the last CHoCH we alerted on
@@ -987,7 +988,7 @@ def _check_close(adapter, session, risk, state) -> bool:
                         f"[{state.symbol}] Trail moved {trail.old_stop:.4f} -> {trail.new_stop:.4f} "
                         f"mode={trail.mode} reason={trail.reason}"
                     )
-                    if trail.is_major:
+                    if trail.is_major and not state.trail_notified:
                         _tg(tg_templates.trail(
                             state.symbol,
                             trail.old_stop,
@@ -995,6 +996,7 @@ def _check_close(adapter, session, risk, state) -> bool:
                             trail.mode or "trail",
                             trail.reason or "trail update",
                         ))
+                        state.trail_notified = True
                 _maybe_activate_trailing_take_profit(adapter, session, state, trade, trail_df, trade_params)
         except Exception as e:
             log.warning(f"[{state.symbol}] trailing stop check failed: {e}")
@@ -1205,6 +1207,7 @@ def _check_close(adapter, session, risk, state) -> bool:
     state.sl_order_id   = None
     state.tp_order_id   = None
     state.be_armed      = False
+    state.trail_notified = False
     state.tp_trailing_active = False
     return True
 
