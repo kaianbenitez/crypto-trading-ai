@@ -120,15 +120,21 @@ def _tg(message: str) -> None:
 # Candle helpers
 # ---------------------------------------------------------------------------
 
+def _period_ms(tf: str) -> int:
+    if tf == "1h":
+        return 3_600_000
+    if tf == "15m":
+        return 900_000
+    if tf == "4h":
+        return 14_400_000
+    if tf == "1d":
+        return 86_400_000
+    return 3_600_000
+
+
 def _candle_close_timestamp(tf: str) -> int:
     now_ms = int(time.time() * 1000)
-    if tf == "1h":
-        period_ms = 3_600_000
-    elif tf == "15m":
-        period_ms = 900_000
-    else:
-        period_ms = 3_600_000
-    return (now_ms // period_ms) * period_ms
+    return (now_ms // _period_ms(tf)) * _period_ms(tf)
 
 
 def _normalize_position_symbol(symbol: str | None) -> str:
@@ -450,13 +456,22 @@ def _recover_protective_order_ids(adapter, state, trade) -> None:
         pass
 
 
-def _fetch_df(adapter, symbol: str) -> pd.DataFrame:
-    candles = adapter.fetch_ohlcv(symbol, TIMEFRAME, limit=CANDLES)
+def _closed_ohlcv_df(candles, tf: str) -> pd.DataFrame:
     df = pd.DataFrame([{
         "open": c.open, "high": c.high, "low": c.low,
         "close": c.close, "volume": c.volume, "timestamp": c.timestamp,
     } for c in candles])
-    return df.sort_values("timestamp").reset_index(drop=True)
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    now_ms = int(time.time() * 1000)
+    period_ms = _period_ms(tf)
+    while not df.empty and int(df.iloc[-1]["timestamp"]) + period_ms > now_ms:
+        df = df.iloc[:-1]
+    return df.reset_index(drop=True)
+
+
+def _fetch_df(adapter, symbol: str) -> pd.DataFrame:
+    candles = adapter.fetch_ohlcv(symbol, TIMEFRAME, limit=CANDLES)
+    return _closed_ohlcv_df(candles, TIMEFRAME)
 
 
 def _prepare_df(df: pd.DataFrame, params: dict) -> pd.DataFrame:
@@ -1483,10 +1498,7 @@ def run():
                             for tf in ("4h", "1d"):
                                 tf_dfs[tf] = resample_ohlcv(raw_1h, tf)
                             candles_4h = adapter.fetch_ohlcv(symbol, "4h", limit=100)
-                            tf_dfs["4h"] = pd.DataFrame([{
-                                "open": c.open, "high": c.high, "low": c.low,
-                                "close": c.close, "volume": c.volume, "timestamp": c.timestamp,
-                            } for c in candles_4h])
+                            tf_dfs["4h"] = _closed_ohlcv_df(candles_4h, "4h")
 
                             mtf = compute_confluence(
                                 tf_dfs, state.params,
